@@ -5,8 +5,10 @@ Agent sessions (Claude Code, Codex CLI) on different machines hold threaded
 conversations: messages, task requests with a lifecycle (pending -> working ->
 done/failed), results with attached files, and structured metadata. Each
 machine runs `a2a daemon` (reachable over Tailscale); `a2a wait` blocks until
-delivery so a session gets woken instead of polling. See AGENTS.md for the
-listener protocol agents follow.
+delivery so a session gets woken instead of polling. A person can run many
+agent sessions at once: the first session to `a2a read` an item claims it
+(set A2A_AGENT to name a session; defaults to hostname). See skill/SKILL.md
+for the protocol agents follow.
 
 Config in ~/.a2a/config.json:
 {
@@ -27,6 +29,7 @@ import base64
 import json
 import os
 import secrets
+import socket
 import subprocess
 import sys
 import time
@@ -58,6 +61,10 @@ def ensure_dirs():
 
 def new_id():
     return time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)
+
+
+def agent_name():
+    return os.environ.get("A2A_AGENT", socket.gethostname())
 
 
 def sanitize_filename(name):
@@ -111,13 +118,14 @@ class Handler(BaseHTTPRequestHandler):
             "thread": str(item.get("thread") or item_id)[:64],
             "reply_to": str(item.get("reply_to", ""))[:64],
             "from": str(item.get("from", "unknown"))[:64],
+            "from_agent": str(item.get("from_agent", ""))[:64],
             "kind": item["kind"],
             "status": item.get("status", ""),
             "text": str(item.get("text", ""))[:200_000],
             "meta": item.get("meta") if isinstance(item.get("meta"), dict) else {},
             "files": [],
             "received": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "read": False,
+            "claimed_by": "",
         }
         if stored["kind"] == "result" and stored["status"] not in STATUSES:
             self._json(400, {"error": f"result status must be one of {STATUSES}"})
@@ -174,6 +182,7 @@ def deliver(cfg, peer_name, payload):
     if not peer:
         sys.exit(f"Unknown peer '{peer_name}'. Known: {', '.join(cfg.get('peers', {}))}")
     payload["from"] = cfg["me"]
+    payload["from_agent"] = agent_name()
     req = urllib.request.Request(
         peer["url"].rstrip("/") + "/send",
         data=json.dumps(payload).encode(),
@@ -274,26 +283,31 @@ def summarise(i, direction):
     who = f"from {i['from']}" if direction == "in" else f"to {i['to']}"
     status = f" [{i['status']}]" if i.get("status") else ""
     files = f" ({len(i['files'])} file{'s' if len(i['files']) != 1 else ''})" if i.get("files") else ""
+    claimed = f" (claimed: {i['claimed_by']})" if i.get("claimed_by") else ""
     preview = i["text"][:80].replace("\n", " ")
-    return f"{i['id']}  {i['kind']:<7}{status} {who}{files}  {preview}"
+    return f"{i['id']}  {i['kind']:<7}{status} {who}{files}{claimed}  {preview}"
 
 
 def cmd_inbox(cfg, args):
     ensure_dirs()
     items = [json.loads(p.read_text()) for p in sorted(INBOX_DIR.glob("*.json"))]
-    if args.unread:
-        items = [i for i in items if not i["read"]]
+    if args.unclaimed:
+        items = [i for i in items if not i.get("claimed_by")]
     if not items:
-        print("No unread items" if args.unread else "Inbox empty")
+        print("No unclaimed items" if args.unclaimed else "Inbox empty")
         return
     for i in items:
-        flag = " " if i["read"] else "*"
+        flag = " " if i.get("claimed_by") else "*"
         print(f"{flag} {summarise(i, 'in')}")
 
 
 def cmd_read(cfg, args):
     path = INBOX_DIR / f"{args.id}.json"
     item = find_inbox_item(args.id)
+    me_agent = agent_name()
+    if item.get("claimed_by") and item["claimed_by"] != me_agent and not args.force:
+        sys.exit(f"Already claimed by agent '{item['claimed_by']}' - it is handling this "
+                 f"item (use --force to read anyway without claiming)")
     shown = {k: v for k, v in item.items() if k != "files"}
     shown["files"] = [f["filename"] for f in item["files"]]
     print(json.dumps(shown, indent=2))
@@ -301,8 +315,9 @@ def cmd_read(cfg, args):
         out = Path(args.out or ".") / f["filename"]
         out.write_bytes(Path(f["stored_path"]).read_bytes())
         print(f"File written to {out.resolve()}")
-    item["read"] = True
-    path.write_text(json.dumps(item, indent=2))
+    if not item.get("claimed_by"):
+        item["claimed_by"] = me_agent
+        path.write_text(json.dumps(item, indent=2))
 
 
 def cmd_thread(cfg, args):
@@ -337,6 +352,25 @@ def cmd_wait(cfg, args):
             print("Timed out with no new items")
             sys.exit(2)
         time.sleep(1)
+
+
+def cmd_peer(cfg, args):
+    if args.action == "list":
+        for name, peer in cfg.get("peers", {}).items():
+            print(f"{name}  {peer['url']}")
+        return
+    if not args.name:
+        sys.exit("peer add/remove needs a name")
+    if args.action == "add":
+        if not (args.url and args.token):
+            sys.exit("Usage: a2a peer add NAME URL TOKEN")
+        cfg.setdefault("peers", {})[args.name] = {"url": args.url, "token": args.token}
+    elif args.action == "remove":
+        if args.name not in cfg.get("peers", {}):
+            sys.exit(f"No peer '{args.name}'")
+        del cfg["peers"][args.name]
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
+    print(f"Peer '{args.name}' {'added' if args.action == 'add' else 'removed'}")
 
 
 def cmd_init(cfg_unused, args):
@@ -389,11 +423,18 @@ def main():
     sp.add_argument("--meta", action="append")
 
     sp = sub.add_parser("inbox", help="list received items")
-    sp.add_argument("--unread", action="store_true")
+    sp.add_argument("--unclaimed", action="store_true")
 
-    sp = sub.add_parser("read", help="show an item (writes files to cwd), mark read")
+    sp = sub.add_parser("read", help="show an item (writes files to cwd), claim it for this agent")
     sp.add_argument("id")
     sp.add_argument("--out")
+    sp.add_argument("--force", action="store_true", help="read without claiming, even if claimed")
+
+    sp = sub.add_parser("peer", help="manage peers")
+    sp.add_argument("action", choices=["add", "list", "remove"])
+    sp.add_argument("name", nargs="?")
+    sp.add_argument("url", nargs="?")
+    sp.add_argument("token", nargs="?")
 
     sp = sub.add_parser("thread", help="show a whole conversation, both directions")
     sp.add_argument("id")
@@ -404,7 +445,7 @@ def main():
     args = p.parse_args()
     cfg = None if args.cmd == "init" else load_config()
     {"init": cmd_init, "daemon": cmd_daemon, "send": cmd_send, "reply": cmd_reply,
-     "result": cmd_result, "inbox": cmd_inbox, "read": cmd_read,
+     "result": cmd_result, "inbox": cmd_inbox, "read": cmd_read, "peer": cmd_peer,
      "thread": cmd_thread, "wait": cmd_wait}[args.cmd](cfg, args)
 
 
