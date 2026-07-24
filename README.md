@@ -33,6 +33,15 @@ instruction files if present), and starts the daemon as a systemd user
 service. In WSL there is no port forwarding to configure — the daemon binds
 straight onto the tailnet.
 
+**Joining someone else's tailnet without a Tailscale account:** the tailnet
+owner generates an auth key (admin console → Settings → Keys → Auth keys)
+and sends it to you; pass it in and there is no sign-up or browser login at
+all — the only prompt is your sudo password:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jreverett/A2A/master/install.sh | bash -s -- --me bob --auth-key tskey-auth-...
+```
+
 At the end it prints your address and inbox token. Swap those with your peer
 (out of band), then each side runs:
 

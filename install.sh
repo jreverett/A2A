@@ -3,17 +3,18 @@
 #   curl -fsSL https://raw.githubusercontent.com/jreverett/A2A/master/install.sh | bash -s -- --me alice
 # Or from a clone: ./install.sh --me alice
 set -e
-ME=""; PORT=8765; DIR="$HOME/a2a"; SKIP_NETWORK=""
+ME=""; PORT=8765; DIR="$HOME/a2a"; SKIP_NETWORK=""; AUTH_KEY=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --me) ME="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --dir) DIR="$2"; shift 2 ;;
+    --auth-key) AUTH_KEY="$2"; shift 2 ;;
     --skip-network) SKIP_NETWORK=1; shift ;;
     *) echo "Unknown option $1"; exit 1 ;;
   esac
 done
-[ -n "$ME" ] || { echo "Usage: install.sh --me <name> [--port 8765] [--dir <clone-dir>] [--skip-network]"; exit 1; }
+[ -n "$ME" ] || { echo "Usage: install.sh --me <name> [--auth-key tskey-...] [--port 8765] [--dir <clone-dir>] [--skip-network]"; exit 1; }
 
 command -v python3 >/dev/null || { echo "python3 is required"; exit 1; }
 
@@ -72,13 +73,26 @@ if [ -z "$SKIP_NETWORK" ]; then
     fi
   fi
   if [ -z "$(tailscale ip -4 2>/dev/null)" ]; then
-    banner "PROMPT COMING UP: Tailscale login link" \
-           "" \
-           "Why: this authenticates your machine into the shared tailnet so" \
-           "your peer's machine can reach your a2a inbox (and only that -" \
-           "traffic stays inside the encrypted mesh). Open the printed link" \
-           "in your browser and sign in."
-    sudo tailscale up
+    if [ -n "$AUTH_KEY" ]; then
+      banner "Joining the shared private network" \
+             "" \
+             "Using the auth key you were given - no account or sign-up" \
+             "needed. Your machine joins your peer's tailnet so their a2a" \
+             "daemon can reach yours; traffic stays inside the encrypted" \
+             "mesh."
+      sudo tailscale up --auth-key "$AUTH_KEY"
+    else
+      banner "PROMPT COMING UP: Tailscale login link" \
+             "" \
+             "Why: this authenticates your machine into the shared tailnet so" \
+             "your peer's machine can reach your a2a inbox (and only that -" \
+             "traffic stays inside the encrypted mesh). Open the printed link" \
+             "in your browser and sign in." \
+             "" \
+             "(No account? Ask your peer for an auth key and rerun with" \
+             " --auth-key tskey-... to skip sign-in entirely.)"
+      sudo tailscale up
+    fi
   fi
 fi
 
