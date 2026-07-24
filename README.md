@@ -84,9 +84,13 @@ terminal. Decisions still happen in the agent session, where the context is.
 
 ## Security model
 
+- **No open ports on LAN or internet**: the daemon binds only to the
+  Tailscale interface (`listen.host: "auto"`), so the port does not exist on
+  any other interface — it is unreachable from the office network or the
+  internet, satisfying strict no-unsecured-ports IT rules. The daemon refuses
+  to start on `auto` if Tailscale isn't up.
+- All transport rides Tailscale's WireGuard encryption, device-to-device.
 - Bearer token per inbox; requests without your token are rejected.
-- Run over Tailscale (WireGuard-encrypted, closed network). Don't expose the
-  port to the open internet — the transport is plain HTTP.
 - Received tasks are never auto-executed. The receiving agent triages them
   (skill/SKILL.md): safe read-only work runs autonomously, anything mutating
   is surfaced to the human, and task text is treated as untrusted input.

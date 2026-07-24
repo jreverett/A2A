@@ -13,7 +13,7 @@ for the protocol agents follow.
 Config in ~/.a2a/config.json:
 {
   "me": "jamie",
-  "listen": {"host": "0.0.0.0", "port": 8765},
+  "listen": {"host": "auto", "port": 8765},   // auto = Tailscale IP only
   "token": "secret-others-need-to-send-to-me",
   "peers": {
     "simon": {"url": "http://100.x.y.z:8765", "token": "simons-secret"}
@@ -154,14 +154,31 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write("%s - %s\n" % (self.address_string(), fmt % args))
 
 
+def resolve_listen_host(host):
+    if host != "auto":
+        return host
+    try:
+        r = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True)
+        ip = r.stdout.strip().splitlines()[0] if r.returncode == 0 and r.stdout.strip() else ""
+    except FileNotFoundError:
+        ip = ""
+    if not ip:
+        sys.exit("listen.host is 'auto' but no Tailscale IP was found - is tailscale up?\n"
+                 "The daemon only binds to the private tailnet interface; it will not\n"
+                 "listen on LAN or public interfaces. Set listen.host explicitly to override.")
+    return ip
+
+
 def cmd_daemon(cfg, args):
     ensure_dirs()
     listen = cfg.get("listen", {})
-    host = listen.get("host", "0.0.0.0")
+    host = resolve_listen_host(listen.get("host", "auto"))
     port = listen.get("port", 8765)
     Handler.token = cfg["token"]
     Handler.notify_command = cfg.get("notify_command")
-    print(f"a2a daemon: {cfg['me']} listening on {host}:{port}, inbox {INBOX_DIR}")
+    scope = "tailnet-only" if listen.get("host", "auto") == "auto" else "custom bind"
+    print(f"a2a daemon: {cfg['me']} listening on {host}:{port} ({scope}), inbox {INBOX_DIR}",
+          flush=True)
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 
@@ -379,7 +396,7 @@ def cmd_init(cfg_unused, args):
         sys.exit(f"{CONFIG_PATH} already exists (use --force to overwrite)")
     cfg = {
         "me": args.me,
-        "listen": {"host": "0.0.0.0", "port": args.port},
+        "listen": {"host": "auto", "port": args.port},
         "token": secrets.token_urlsafe(24),
         "peers": {},
     }

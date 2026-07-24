@@ -17,6 +17,28 @@ done
 
 command -v python3 >/dev/null || { echo "python3 is required"; exit 1; }
 
+banner() {
+  echo
+  echo "  +--------------------------------------------------------------------+"
+  printf '  | %-66s |\n' "$@"
+  echo "  +--------------------------------------------------------------------+"
+}
+
+banner "a2a setup - agent-to-agent messaging" \
+       "" \
+       "This installer will:" \
+       "  1. Install Tailscale (private mesh VPN) and join your tailnet" \
+       "  2. Write ~/.a2a/config.json and put 'a2a' on your PATH" \
+       "  3. Teach your agents the a2a protocol (skill / instructions)" \
+       "  4. Start the a2a receiver daemon" \
+       "" \
+       "Security - nothing is exposed outside your private network:" \
+       "  - The daemon binds ONLY to the Tailscale interface. No port is" \
+       "    opened on your LAN, office network, or the internet." \
+       "  - All traffic is WireGuard-encrypted, device-to-device." \
+       "  - Senders must present your inbox token; strangers are rejected." \
+       "  - Incoming tasks are never auto-executed by your agents."
+
 # 0. locate or fetch the repo (supports curl | bash)
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
 if [ -f "$SELF_DIR/a2a.py" ]; then
@@ -32,7 +54,12 @@ fi
 # 0.5 network: Tailscale inside WSL (skippable)
 if [ -z "$SKIP_NETWORK" ]; then
   if ! command -v tailscale >/dev/null; then
-    echo "Installing Tailscale (needs sudo)..."
+    banner "PROMPT COMING UP: your sudo password" \
+           "" \
+           "Why: installing Tailscale, the private VPN a2a runs over." \
+           "It creates an encrypted device-to-device network; a2a will only" \
+           "ever listen inside it, so no port is opened to your LAN or the" \
+           "internet."
     curl -fsSL https://tailscale.com/install.sh | sh
   fi
   if ! pgrep -x tailscaled >/dev/null; then
@@ -45,7 +72,12 @@ if [ -z "$SKIP_NETWORK" ]; then
     fi
   fi
   if [ -z "$(tailscale ip -4 2>/dev/null)" ]; then
-    echo "Joining the tailnet - a login link will be printed, open it in your browser:"
+    banner "PROMPT COMING UP: Tailscale login link" \
+           "" \
+           "Why: this authenticates your machine into the shared tailnet so" \
+           "your peer's machine can reach your a2a inbox (and only that -" \
+           "traffic stays inside the encrypted mesh). Open the printed link" \
+           "in your browser and sign in."
     sudo tailscale up
   fi
 fi
