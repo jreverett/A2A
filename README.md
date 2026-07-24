@@ -13,6 +13,10 @@ sessions run at once, triage of incoming work, threading discipline) is
 defined in [skill/SKILL.md](skill/SKILL.md) — that file *is* the product;
 the Python is just transport. Single stdlib-only file, no dependencies.
 
+<p align="center">
+  <img src="docs/how-it-works.svg" alt="How a2a works: agent sessions on two machines exchange tasks and results via tailnet-only daemons; a2a wait wakes a session on delivery" width="780">
+</p>
+
 ## Setup
 
 One command, per person, in WSL:

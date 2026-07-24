@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 320" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="13">
+  <!-- neutral greys + one accent so it reads on light and dark backgrounds -->
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#5b8def"/>
+    </marker>
+  </defs>
+
+  <!-- Jamie's machine -->
+  <rect x="15" y="25" width="255" height="265" rx="10" fill="none" stroke="#8b949e" stroke-width="1.5"/>
+  <text x="142" y="50" text-anchor="middle" fill="#8b949e" font-weight="bold">Jamie's machine (WSL)</text>
+
+  <rect x="35" y="70" width="130" height="30" rx="5" fill="none" stroke="#8b949e"/>
+  <text x="100" y="90" text-anchor="middle" fill="#8b949e">agent session</text>
+  <rect x="45" y="80" width="130" height="30" rx="5" fill="#ffffff" fill-opacity="0.04" stroke="#8b949e"/>
+  <rect x="55" y="90" width="130" height="30" rx="5" fill="#ffffff" fill-opacity="0.04" stroke="#8b949e"/>
+  <text x="120" y="110" text-anchor="middle" fill="#8b949e">agent session</text>
+  <text x="100" y="145" fill="#5b8def">a2a send / reply</text>
+
+  <rect x="35" y="200" width="215" height="70" rx="8" fill="none" stroke="#5b8def" stroke-width="1.5"/>
+  <text x="142" y="225" text-anchor="middle" fill="#5b8def">a2a daemon + inbox</text>
+  <text x="142" y="245" text-anchor="middle" fill="#8b949e" font-size="11">binds to tailnet IP only -</text>
+  <text x="142" y="260" text-anchor="middle" fill="#8b949e" font-size="11">no LAN / internet port</text>
+
+  <!-- wake arrow inside Jamie's machine -->
+  <path d="M 120 200 L 120 125" fill="none" stroke="#5b8def" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+  <text x="130" y="180" fill="#8b949e" font-size="11">a2a wait wakes</text>
+  <text x="130" y="194" fill="#8b949e" font-size="11">a session</text>
+
+  <!-- Simon's machine -->
+  <rect x="510" y="25" width="255" height="265" rx="10" fill="none" stroke="#8b949e" stroke-width="1.5"/>
+  <text x="637" y="50" text-anchor="middle" fill="#8b949e" font-weight="bold">Simon's machine (WSL)</text>
+
+  <rect x="530" y="70" width="130" height="30" rx="5" fill="none" stroke="#8b949e"/>
+  <text x="595" y="90" text-anchor="middle" fill="#8b949e">agent session</text>
+  <rect x="540" y="80" width="130" height="30" rx="5" fill="#ffffff" fill-opacity="0.04" stroke="#8b949e"/>
+  <rect x="550" y="90" width="130" height="30" rx="5" fill="#ffffff" fill-opacity="0.04" stroke="#8b949e"/>
+  <text x="615" y="110" text-anchor="middle" fill="#8b949e">agent session</text>
+  <text x="595" y="145" fill="#5b8def" text-anchor="middle">first read claims the item</text>
+
+  <rect x="530" y="200" width="215" height="70" rx="8" fill="none" stroke="#5b8def" stroke-width="1.5"/>
+  <text x="637" y="225" text-anchor="middle" fill="#5b8def">a2a daemon + inbox</text>
+  <text x="637" y="245" text-anchor="middle" fill="#8b949e" font-size="11">token-checked; strangers</text>
+  <text x="637" y="260" text-anchor="middle" fill="#8b949e" font-size="11">rejected</text>
+
+  <!-- wake arrow inside Simon's machine -->
+  <path d="M 660 200 L 660 125" fill="none" stroke="#5b8def" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
+  <text x="655" y="180" text-anchor="end" fill="#8b949e" font-size="11">a2a wait wakes</text>
+  <text x="655" y="194" text-anchor="end" fill="#8b949e" font-size="11">a session</text>
+
+  <!-- Tailscale tunnel -->
+  <rect x="285" y="205" width="210" height="60" rx="30" fill="none" stroke="#8b949e" stroke-dasharray="6 4"/>
+  <text x="390" y="230" text-anchor="middle" fill="#8b949e" font-size="11">Tailscale tailnet</text>
+  <text x="390" y="245" text-anchor="middle" fill="#8b949e" font-size="11">WireGuard-encrypted, private</text>
+
+  <path d="M 250 218 L 530 218" fill="none" stroke="#5b8def" marker-end="url(#arrow)"/>
+  <text x="390" y="200" text-anchor="middle" fill="#5b8def" font-size="12">messages / files / tasks</text>
+  <path d="M 530 255 L 250 255" fill="none" stroke="#5b8def" marker-end="url(#arrow)"/>
+  <text x="390" y="285" text-anchor="middle" fill="#5b8def" font-size="12">working / done results + files</text>
+</svg>
