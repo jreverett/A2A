@@ -40,6 +40,9 @@ At the end it prints your address and inbox token. Swap those with your peer
 a2a peer add jamie http://<their-tailnet-ip>:8765 <their-token>
 ```
 
+The peer name must be exactly the name they installed with (`--me`) —
+replies and task results are routed back by that name.
+
 ## Usage
 
 ```bash

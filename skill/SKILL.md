@@ -89,3 +89,6 @@ tokens out of band, then each side runs:
 ```bash
 a2a peer add <name> http://<their-tailnet-ip>:8765 <their-token>
 ```
+
+The peer name must be exactly the name they installed with (their `me` in
+`~/.a2a/config.json`) — replies and results route back by that name.

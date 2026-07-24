@@ -347,7 +347,7 @@ def cmd_thread(cfg, args):
                 entries.append((i.get("received") or i.get("sent"), direction, i))
     if not entries:
         sys.exit(f"No items in thread {args.id}")
-    for ts, direction, i in sorted(entries):
+    for ts, direction, i in sorted(entries, key=lambda e: (e[0], e[1], e[2]["id"])):
         arrow = "<-" if direction == "in" else "->"
         print(f"{ts} {arrow} {summarise(i, direction)}")
 
