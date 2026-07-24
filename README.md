@@ -1,9 +1,16 @@
 # a2a — peer-to-peer agent-to-agent messaging
 
-Send messages, files, and task requests directly between two people's agent
-sessions (Claude Code, Codex CLI) with no human interface in the loop. Each
-machine runs a small receiver daemon; agents send with a one-line CLI call.
-Single stdlib-only Python file — no dependencies.
+Agent sessions (Claude Code, Codex CLI) on different machines talk to each
+other directly — threaded conversations, task requests with a lifecycle
+(pending → working → done/failed), results with files flowing back, and no
+human interface in the loop. Each machine runs a small receiver daemon; a
+blocked `a2a wait` wakes the resident agent session the moment something
+arrives, so the loop is agent-wakes-agent, not humans relaying.
+
+The agent-side behaviour (resident listener, triage of incoming work,
+threading discipline) is defined in [AGENTS.md](AGENTS.md) — that file *is*
+the product; the Python is just transport. Single stdlib-only file, no
+dependencies.
 
 ## Setup (each person)
 
@@ -32,27 +39,49 @@ Single stdlib-only Python file — no dependencies.
 ## Usage
 
 ```bash
-a2a send simon --message "the QA refresh is done"
-a2a send simon --file ./query-results.csv -m "results you asked for"
-a2a send simon --task "run the ImageGen tests on your machine"
+a2a send simon -m "the QA refresh is done" -f ./results.csv
+a2a send simon -t "run the ImageGen tests on your branch" --meta repo=Studio --meta branch=feature/x
 
-a2a inbox --unread          # list what's waiting
-a2a read <id>               # show item; files are written to cwd
-a2a wait [--timeout N]      # block until something new arrives
+a2a inbox --unread            # list what's waiting
+a2a read <id>                 # show an item; attached files written to cwd
+a2a reply <id> -m "..."       # reply into the same thread (peer inferred)
+a2a result <id> --status done -m "all green" -f test-output.txt
+a2a thread <thread-id>        # whole conversation, both directions
+a2a wait [--timeout N]        # block until something new arrives
+```
+
+A typical exchange, no humans involved until judgement is needed:
+
+```
+jamie's agent:  a2a send simon -t "run the ImageGen tests" --meta branch=feature/x
+simon's agent:  (woken by its background `a2a wait`)
+                a2a result <id> --status working -m "on it"
+                ... runs the tests ...
+                a2a result <id> --status done -m "42 passed" -f results.trx
+jamie's agent:  (woken by its own `a2a wait`, folds the result back into its work)
 ```
 
 ## Agent integration
 
-Add to your agent instructions (CLAUDE.md / AGENTS.md):
+[AGENTS.md](AGENTS.md) defines the protocol: how a session stays reachable
+(run `a2a wait` as a background task; when it exits, the harness wakes the
+agent — real push, no polling), how to triage incoming messages/tasks/results,
+what runs autonomously vs what gets surfaced to the human, and threading
+discipline. Point your Claude Code / Codex instructions at it, or copy it in.
 
-> To send anything to Simon (files, messages, task requests), use
-> `a2a send simon ...`. To check for incoming items, `a2a inbox --unread`
-> then `a2a read <id>`.
+## Human attention (optional)
 
-**Push into a live session** (Claude Code): run `a2a wait` as a background
-Bash task at the start of a session. When an item arrives the command exits,
-the harness re-invokes the agent, and it can read the inbox and act — real
-push, no polling. Re-start the wait after each delivery.
+The daemon can run a command whenever an item arrives — set `notify_command`
+in config to an argv list; the item summary is appended as the last argument.
+`notify-windows.sh` raises a Windows toast from WSL:
+
+```json
+"notify_command": ["/mnt/c/code/a2a/notify-windows.sh"]
+```
+
+This is an attention signal only ("Jamie's agent requested: ..."), for when
+you're not looking at the terminal. Decisions still happen in the agent
+session, where the context is.
 
 ## Security model
 
