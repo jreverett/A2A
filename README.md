@@ -15,27 +15,26 @@ the Python is just transport. Single stdlib-only file, no dependencies.
 
 ## Setup
 
-One-off, per person, in WSL:
+One command, per person, in WSL:
 
 ```bash
-# 1. Network: install Tailscale inside WSL and join the shared tailnet.
-#    (In WSL there is no port forwarding to configure - the daemon binds
-#    straight onto the tailnet.)
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
-
-# 2. Install a2a: config, PATH, agent skill, daemon service.
-git clone https://github.com/jreverett/A2A.git && cd A2A
-./install.sh --me simon        # prints your inbox token
-
-# 3. Exchange tokens with your peer (out of band), then:
-a2a peer add jamie http://<their-tailnet-ip>:8765 <their-token>
+curl -fsSL https://raw.githubusercontent.com/jreverett/A2A/master/install.sh | bash -s -- --me simon
 ```
 
-`install.sh` writes `~/.a2a/config.json`, puts `a2a` on PATH, installs the
-skill for Claude Code (`~/.claude/skills/a2a`) and appends a pointer to
-Codex/Copilot instruction files if present, and starts the daemon as a
-systemd user service.
+It clones the repo, installs Tailscale inside WSL and joins the tailnet
+(pausing once for you to open the printed login link — the only manual step),
+writes `~/.a2a/config.json`, puts `a2a` on PATH, installs the agent skill for
+Claude Code (`~/.claude/skills/a2a`, plus pointers in Codex/Copilot
+instruction files if present), and starts the daemon as a systemd user
+service. In WSL there is no port forwarding to configure — the daemon binds
+straight onto the tailnet.
+
+At the end it prints your address and inbox token. Swap those with your peer
+(out of band), then each side runs:
+
+```bash
+a2a peer add jamie http://<their-tailnet-ip>:8765 <their-token>
+```
 
 ## Usage
 
