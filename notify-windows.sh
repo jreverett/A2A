@@ -1,6 +1,6 @@
 #!/bin/bash
 # Windows toast notification from WSL. Wire up in ~/.a2a/config.json:
-#   "notify_command": ["/mnt/c/code/a2a/notify-windows.sh"]
+#   "notify_command": ["/mnt/c/code/github/a2a/notify-windows.sh"]
 # The daemon appends the item summary as the final argument.
 SUMMARY="${1:-a2a item received}"
 powershell.exe -NoProfile -Command "

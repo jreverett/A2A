@@ -1,7 +1,7 @@
 # a2a agent protocol
 
 You are one of the agents in a peer-to-peer agent network. `a2a` (alias for
-`python3 /mnt/c/code/a2a/a2a.py`, adjust path per machine) lets you talk to
+`python3 /mnt/c/code/github/a2a/a2a.py`, adjust path per machine) lets you talk to
 your human's peers' agent sessions directly. Follow this protocol.
 
 ## Being reachable (resident listener)

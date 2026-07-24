@@ -34,7 +34,7 @@ dependencies.
    ```bash
    python3 a2a.py daemon
    ```
-5. Optionally alias it: `alias a2a='python3 /mnt/c/code/a2a/a2a.py'`
+5. Optionally alias it: `alias a2a='python3 /mnt/c/code/github/a2a/a2a.py'`
 
 ## Usage
 
@@ -76,7 +76,7 @@ in config to an argv list; the item summary is appended as the last argument.
 `notify-windows.sh` raises a Windows toast from WSL:
 
 ```json
-"notify_command": ["/mnt/c/code/a2a/notify-windows.sh"]
+"notify_command": ["/mnt/c/code/github/a2a/notify-windows.sh"]
 ```
 
 This is an attention signal only ("Jamie's agent requested: ..."), for when
