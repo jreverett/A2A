@@ -4,17 +4,21 @@
 # Or from a clone: ./install.sh --me alice
 set -e
 ME=""; PORT=8765; DIR="$HOME/a2a"; SKIP_NETWORK=""; AUTH_KEY=""
+PEER_NAME=""; PEER_URL=""; PEER_TOKEN=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --me) ME="$2"; shift 2 ;;
     --port) PORT="$2"; shift 2 ;;
     --dir) DIR="$2"; shift 2 ;;
     --auth-key) AUTH_KEY="$2"; shift 2 ;;
+    --peer) PEER_NAME="$2"; shift 2 ;;
+    --peer-url) PEER_URL="$2"; shift 2 ;;
+    --peer-token) PEER_TOKEN="$2"; shift 2 ;;
     --skip-network) SKIP_NETWORK=1; shift ;;
     *) echo "Unknown option $1"; exit 1 ;;
   esac
 done
-[ -n "$ME" ] || { echo "Usage: install.sh --me <name> [--auth-key tskey-...] [--port 8765] [--dir <clone-dir>] [--skip-network]"; exit 1; }
+[ -n "$ME" ] || { echo "Usage: install.sh --me <name> [--auth-key tskey-...] [--peer <name> --peer-url <url> --peer-token <token>] [--port 8765] [--dir <clone-dir>] [--skip-network]"; exit 1; }
 
 command -v python3 >/dev/null || { echo "python3 is required"; exit 1; }
 
@@ -23,6 +27,34 @@ banner() {
   echo "  +--------------------------------------------------------------------+"
   printf '  | %-66s |\n' "$@"
   echo "  +--------------------------------------------------------------------+"
+}
+
+TTY=""; [ -t 1 ] && TTY=1
+STEP_LOG="${TMPDIR:-/tmp}/a2a-install-step.log"
+
+# spin "label" cmd...  - animated spinner on a TTY, plain line otherwise
+spin() {
+  local label="$1"; shift
+  if [ -z "$TTY" ]; then
+    echo "  $label..."
+    "$@"
+    return
+  fi
+  "$@" >"$STEP_LOG" 2>&1 &
+  local pid=$! frames='|/-\' i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    i=$(( (i+1) % 4 ))
+    printf '\r  [%s] %s ' "${frames:$i:1}" "$label"
+    sleep 0.15
+  done
+  local rc=0; wait "$pid" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    printf '\r  [ok] %s\n' "$label"
+  else
+    printf '\r  [!!] %s failed:\n' "$label"
+    cat "$STEP_LOG"
+  fi
+  return "$rc"
 }
 
 banner "a2a setup - agent-to-agent messaging" \
@@ -47,8 +79,7 @@ if [ -f "$SELF_DIR/a2a.py" ]; then
 elif [ -f "$DIR/a2a.py" ]; then
   REPO_DIR="$DIR"
 else
-  echo "Cloning a2a to $DIR"
-  git clone -q https://github.com/jreverett/A2A.git "$DIR"
+  spin "Fetching a2a" git clone -q https://github.com/jreverett/A2A.git "$DIR"
   REPO_DIR="$DIR"
 fi
 
@@ -61,7 +92,8 @@ if [ -z "$SKIP_NETWORK" ]; then
            "It creates an encrypted device-to-device network; a2a will only" \
            "ever listen inside it, so no port is opened to your LAN or the" \
            "internet."
-    curl -fsSL https://tailscale.com/install.sh | sh
+    sudo -v
+    spin "Installing Tailscale" sh -c 'curl -fsSL https://tailscale.com/install.sh | sh'
   fi
   if ! pgrep -x tailscaled >/dev/null; then
     if command -v systemctl >/dev/null && systemctl is-system-running >/dev/null 2>&1; then
@@ -80,7 +112,8 @@ if [ -z "$SKIP_NETWORK" ]; then
              "needed. Your machine joins your peer's tailnet so their a2a" \
              "daemon can reach yours; traffic stays inside the encrypted" \
              "mesh."
-      sudo tailscale up --auth-key "$AUTH_KEY"
+      sudo -v
+      spin "Joining the private network" sudo tailscale up --auth-key "$AUTH_KEY"
     else
       banner "PROMPT COMING UP: Tailscale login link" \
              "" \
@@ -148,10 +181,28 @@ else
   echo "No systemd; start the daemon manually: nohup a2a daemon >~/.a2a/daemon.log 2>&1 &"
 fi
 
+# 5. connect to a peer and introduce myself (their side runs `a2a accept`)
+if [ -n "$PEER_NAME" ]; then
+  if [ -n "$PEER_URL" ] && [ -n "$PEER_TOKEN" ]; then
+    python3 "$REPO_DIR/a2a.py" peer add "$PEER_NAME" "$PEER_URL" "$PEER_TOKEN"
+    if spin "Connecting to $PEER_NAME" python3 "$REPO_DIR/a2a.py" introduce "$PEER_NAME"; then
+      banner "Introduced yourself to $PEER_NAME" \
+             "" \
+             "  you ---------------> $PEER_NAME     delivered" \
+             "  you <--------------- $PEER_NAME     once they run: a2a accept" \
+             "" \
+             "Their agent will accept and confirm; then you're connected" \
+             "both ways."
+    fi
+  else
+    echo "--peer needs --peer-url and --peer-token too; skipping connect"
+  fi
+fi
+
 TOKEN=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.a2a/config.json')))['token'])")
 IP=$(tailscale ip -4 2>/dev/null | head -1 || true)
 echo
-echo "Done. Give your peers these two lines:"
+echo "Done. Your details, should a peer need to add you manually:"
 echo "  address: http://${IP:-<your-tailnet-ip>}:$PORT"
 echo "  token:   $TOKEN"
-echo "Add a peer with: a2a peer add <name> <their-address> <their-token>"
+echo "Connect to someone: a2a peer add <name> <their-address> <their-token> && a2a introduce <name>"

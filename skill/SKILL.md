@@ -81,14 +81,28 @@ it to your human and reply saying so.
 **result** — a task you sent has progressed. Fold it back into the
 originating work; `a2a thread <thread-id>` recovers the context.
 
+**introduction** — a message whose meta has `a2a_intent: introduce`: someone
+new is sharing their address+token so your person can reach them. They could
+only deliver it because they already hold your person's inbox token, so your
+person gave that out deliberately. If your person mentioned expecting this
+connection, run `a2a accept <id>` (adds them as a peer and confirms back)
+and tell your person you're now connected. If the introduction is a
+surprise, surface it to your person first and accept only if they agree.
+A message with `a2a_intent: accepted` means your own introduction was
+accepted - you're connected; tell your person.
+
 ## Adding a person
 
-They install a2a (repo README), which prints their inbox token; you exchange
-tokens out of band, then each side runs:
+Only one direction needs manual details. Whoever connects second runs:
 
 ```bash
 a2a peer add <name> http://<their-tailnet-ip>:8765 <their-token>
+a2a introduce <name>
 ```
+
+(or passes `--peer/--peer-url/--peer-token` to the installer, which does
+both). The other side accepts the introduction (`a2a accept <id>`) and both
+directions are connected — no manual token exchange back.
 
 The peer name must be exactly the name they installed with (their `me` in
 `~/.a2a/config.json`) — replies and results route back by that name.

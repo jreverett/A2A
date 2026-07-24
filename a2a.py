@@ -371,6 +371,41 @@ def cmd_wait(cfg, args):
         time.sleep(1)
 
 
+def cmd_introduce(cfg, args):
+    listen = cfg.get("listen", {})
+    host = resolve_listen_host(listen.get("host", "auto"))
+    url = f"http://{host}:{listen.get('port', 8765)}"
+    payload = {
+        "kind": "message",
+        "text": f"{cfg['me']} would like to connect - accept with: a2a accept <item-id>",
+        "meta": {"a2a_intent": "introduce", "name": cfg["me"],
+                 "url": url, "token": cfg["token"]},
+    }
+    result = deliver(cfg, args.peer, payload)
+    print(f"Introduction sent to {args.peer} (id {result['id']}); "
+          f"once accepted they can message you back")
+
+
+def cmd_accept(cfg, args):
+    item = find_inbox_item(args.id)
+    meta = item.get("meta", {})
+    if meta.get("a2a_intent") != "introduce":
+        sys.exit(f"Item {args.id} is not an introduction")
+    name, url, token = meta.get("name"), meta.get("url"), meta.get("token")
+    if not (name and url and token):
+        sys.exit("Introduction is missing name/url/token")
+    cfg.setdefault("peers", {})[name] = {"url": url, "token": token}
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
+    item["claimed_by"] = agent_name()
+    (INBOX_DIR / f"{item['id']}.json").write_text(json.dumps(item, indent=2))
+    payload = {"kind": "message",
+               "text": f"{cfg['me']} accepted your introduction - connected.",
+               "thread": item["thread"], "reply_to": item["id"],
+               "meta": {"a2a_intent": "accepted", "name": cfg["me"]}}
+    deliver(cfg, name, payload)
+    print(f"Peer '{name}' added ({url}) and confirmation sent")
+
+
 def cmd_peer(cfg, args):
     if args.action == "list":
         for name, peer in cfg.get("peers", {}).items():
@@ -447,6 +482,12 @@ def main():
     sp.add_argument("--out")
     sp.add_argument("--force", action="store_true", help="read without claiming, even if claimed")
 
+    sp = sub.add_parser("introduce", help="send a peer my address+token so they can add me")
+    sp.add_argument("peer")
+
+    sp = sub.add_parser("accept", help="accept an introduction: add them as a peer, confirm back")
+    sp.add_argument("id")
+
     sp = sub.add_parser("peer", help="manage peers")
     sp.add_argument("action", choices=["add", "list", "remove"])
     sp.add_argument("name", nargs="?")
@@ -463,6 +504,7 @@ def main():
     cfg = None if args.cmd == "init" else load_config()
     {"init": cmd_init, "daemon": cmd_daemon, "send": cmd_send, "reply": cmd_reply,
      "result": cmd_result, "inbox": cmd_inbox, "read": cmd_read, "peer": cmd_peer,
+     "introduce": cmd_introduce, "accept": cmd_accept,
      "thread": cmd_thread, "wait": cmd_wait}[args.cmd](cfg, args)
 
 

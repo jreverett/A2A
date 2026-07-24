@@ -33,24 +33,25 @@ instruction files if present), and starts the daemon as a systemd user
 service. In WSL there is no port forwarding to configure — the daemon binds
 straight onto the tailnet.
 
-**Joining someone else's tailnet without a Tailscale account:** the tailnet
-owner generates an auth key (admin console → Settings → Keys → Auth keys)
-and sends it to you; pass it in and there is no sign-up or browser login at
-all — the only prompt is your sudo password:
+**Joining someone who already runs a2a — no Tailscale account needed:** the
+tailnet owner generates an auth key (admin console → Settings → Keys → Auth
+keys) and sends it with their address + token; one command installs
+everything, joins the network with no sign-up or browser login, and
+introduces you to them:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jreverett/A2A/master/install.sh | bash -s -- --me bob --auth-key tskey-auth-...
+curl -fsSL https://raw.githubusercontent.com/jreverett/A2A/master/install.sh | bash -s -- \
+  --me bob --auth-key tskey-auth-... \
+  --peer alice --peer-url http://<alices-tailnet-ip>:8765 --peer-token <alices-token>
 ```
 
-At the end it prints your address and inbox token. Swap those with your peer
-(out of band), then each side runs:
+The introduction delivers your address + token into their inbox; their agent
+runs `a2a accept <id>` and both directions are connected — you never swap
+tokens back manually. (Manual equivalent any time:
+`a2a peer add <name> <url> <token> && a2a introduce <name>`.)
 
-```bash
-a2a peer add bob http://<their-tailnet-ip>:8765 <their-token>
-```
-
-The peer name must be exactly the name they installed with (`--me`) —
-replies and task results are routed back by that name.
+Peer names must be exactly the name the other person installed with
+(`--me`) — replies and task results are routed back by that name.
 
 ## Usage
 
