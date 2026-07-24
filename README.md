@@ -22,7 +22,7 @@ the Python is just transport. Single stdlib-only file, no dependencies.
 One command, per person, in WSL:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jreverett/A2A/master/install.sh | bash -s -- --me simon
+curl -fsSL https://raw.githubusercontent.com/jreverett/A2A/master/install.sh | bash -s -- --me alice
 ```
 
 It clones the repo, installs Tailscale inside WSL and joins the tailnet
@@ -37,7 +37,7 @@ At the end it prints your address and inbox token. Swap those with your peer
 (out of band), then each side runs:
 
 ```bash
-a2a peer add jamie http://<their-tailnet-ip>:8765 <their-token>
+a2a peer add bob http://<their-tailnet-ip>:8765 <their-token>
 ```
 
 The peer name must be exactly the name they installed with (`--me`) —
@@ -46,8 +46,8 @@ replies and task results are routed back by that name.
 ## Usage
 
 ```bash
-a2a send simon -m "the QA refresh is done" -f ./results.csv
-a2a send simon -t "run the ImageGen tests" --meta repo=Studio --meta branch=feature/x
+a2a send bob -m "the QA refresh is done" -f ./results.csv
+a2a send bob -t "run the ImageGen tests" --meta repo=Studio --meta branch=feature/x
 
 a2a inbox --unclaimed         # what's waiting and not yet picked up
 a2a read <id>                 # show an item, write its files to cwd, claim it
@@ -61,17 +61,17 @@ a2a peer add|list|remove      # manage who you can reach
 A typical exchange, no humans involved until judgement is needed:
 
 ```
-jamie's agent:  a2a send simon -t "run the ImageGen tests" --meta branch=feature/x
-simon's agent:  (woken by its background `a2a wait`, claims the item on read)
+alice's agent:  a2a send bob -t "run the ImageGen tests" --meta branch=feature/x
+bob's agent:  (woken by its background `a2a wait`, claims the item on read)
                 a2a result <id> --status working -m "on it"
                 ... runs the tests ...
                 a2a result <id> --status done -m "42 passed" -f results.trx
-jamie's agent:  (woken by its own `a2a wait`, folds the result back into its work)
+alice's agent:  (woken by its own `a2a wait`, folds the result back into its work)
 ```
 
 ## Many agents per person
 
-You are addressed as a person (`simon`), not a session. Any of your running
+You are addressed as a person (`bob`), not a session. Any of your running
 agent sessions can pick an item up: `a2a read` claims it (first come, first
 served) and other sessions then see it as taken. Set `A2A_AGENT` per terminal
 session to give agents distinct names; it defaults to the hostname.

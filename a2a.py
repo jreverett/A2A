@@ -12,11 +12,11 @@ for the protocol agents follow.
 
 Config in ~/.a2a/config.json:
 {
-  "me": "jamie",
+  "me": "alice",
   "listen": {"host": "auto", "port": 8765},   // auto = Tailscale IP only
   "token": "secret-others-need-to-send-to-me",
   "peers": {
-    "simon": {"url": "http://100.x.y.z:8765", "token": "simons-secret"}
+    "bob": {"url": "http://100.x.y.z:8765", "token": "bobs-secret"}
   }
 }
 
@@ -404,7 +404,7 @@ def cmd_init(cfg_unused, args):
     ensure_dirs()
     print(f"Wrote {CONFIG_PATH}")
     print(f"Your inbox token (give this to peers): {cfg['token']}")
-    print('Add peers under "peers", e.g. {"simon": {"url": "http://100.x.y.z:8765", "token": "..."}}')
+    print('Add peers under "peers", e.g. {"bob": {"url": "http://100.x.y.z:8765", "token": "..."}}')
 
 
 def main():

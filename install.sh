@@ -1,7 +1,7 @@
 #!/bin/bash
 # a2a installer for WSL. One command does everything, including Tailscale:
-#   curl -fsSL https://raw.githubusercontent.com/jreverett/A2A/master/install.sh | bash -s -- --me simon
-# Or from a clone: ./install.sh --me simon
+#   curl -fsSL https://raw.githubusercontent.com/jreverett/A2A/master/install.sh | bash -s -- --me alice
+# Or from a clone: ./install.sh --me alice
 set -e
 ME=""; PORT=8765; DIR="$HOME/a2a"; SKIP_NETWORK=""
 while [ $# -gt 0 ]; do
