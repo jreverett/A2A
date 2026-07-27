@@ -18,9 +18,15 @@ prints concise plain text and exits; nothing is interactive.
 
 - People are peers: `a2a peer list` shows who you can reach.
 - You are one of possibly several agent sessions your person is running.
-  If the `A2A_AGENT` environment variable is set, that is your agent name;
-  otherwise the hostname is used. When several sessions run concurrently,
-  set a distinct `A2A_AGENT` per session if you can.
+  `A2A_AGENT` names this session; if unset, the hostname is used (so every
+  session on the machine collapses to the same name and becomes
+  indistinguishable). **Always set a distinct, descriptive `A2A_AGENT` per
+  session** — e.g. `A2A_AGENT=laptop-ticket1234` or `A2A_AGENT=laptop-listener`
+  — so sessions can be told apart and addressed individually. A tool shell does
+  not persist env between calls, so inline it on every invocation:
+  `A2A_AGENT=laptop-ticket1234 a2a <cmd>`.
+- `a2a sessions` lists the sessions currently listening (name, host, pid, last
+  heartbeat) — the "who's reachable right now" view for your own machine.
 
 ## Sending
 
@@ -33,11 +39,24 @@ a2a reply <inbox-id> -m "..."                      # continue a thread
 a2a result <inbox-id> --status done -m "42 passed" -f out.txt
 a2a thread <thread-id>                             # view whole conversation
 a2a flush [person]                                 # retry items queued for offline peers
+a2a send <person> -t "..." --agent laptop-ticket99 # address one session of the peer
 ```
 
 - Prefer `reply`/`result` over `send` when responding — they keep threading
   correct automatically. Only use `send --thread <id>` when there is no inbox
   item to respond to.
+- **Targeting a specific session:** add `--agent <name>` to route to one of the
+  peer's sessions instead of any of them. `reply`/`result` do this
+  automatically — they address the session that sent you the item — so a task's
+  result lands back in the originating session, not a random listener. Only pass
+  `--agent` on `reply`/`result` to override. You learn a peer's session names
+  from what they send you (echoed back automatically) or out of band; there is
+  no cross-machine session discovery.
+- **If the target session never reappears**, the peer's daemon eventually acts on
+  your `--fallback` choice: `broadcast` (default — release to any of their
+  sessions and send you a "reassigned" notice), `hold` (keep it pinned for that
+  session), or `bounce` (return an "undeliverable" notice to you). Watch for
+  those `a2a_intent: reassigned` / `undeliverable` messages in replies.
 - Always attach `--meta` the receiving agent will need (repo, branch, ticket,
   paths). Attach files rather than pasting large content into text.
 - Keep text terse and information-dense — the reader is an agent.
@@ -54,16 +73,23 @@ a2a flush [person]                                 # retry items queued for offl
 
 ## Receiving
 
-Check for items: `a2a inbox --unclaimed`, then `a2a read <id>` for each.
-Reading an unclaimed item **claims it for you** — other sessions of your
-person will leave it alone. If a read fails with "already claimed", another
-session is handling it: skip it, don't --force.
+Check for items: `a2a inbox --unclaimed` (add `--mine` to hide items addressed
+to other sessions), then `a2a read <id>` for each. Reading an unclaimed item
+**claims it for you** — other sessions of your person will leave it alone. If a
+read fails with "already claimed", another *live* session is handling it: skip
+it, don't --force. If that session has died, `read` reclaims the item for you
+automatically rather than refusing. An item addressed to a different session
+(`->agent` in the listing) refuses to be read unless you `--force`; leave it
+for its target.
 
-To stay reachable ("listen on a2a"): run `a2a wait` as a background process.
-It blocks until something new arrives, prints a summary, and exits — if your
-harness re-invokes you when background commands finish, that wakes you on
-delivery. Handle the items, then restart `a2a wait`. If your harness has no
-background-wake mechanism, check `a2a inbox --unclaimed` at natural pauses.
+To stay reachable ("listen on a2a"): run `a2a wait` as a background process
+(set a distinct `A2A_AGENT`). It blocks until something new arrives, prints a
+summary, and exits — if your harness re-invokes you when background commands
+finish, that wakes you on delivery. Handle the items, then restart `a2a wait`.
+`a2a wait` only wakes for items addressed to your `A2A_AGENT` or broadcast, so
+running several listeners does not mean they all wake for every message. If
+your harness has no background-wake mechanism, check `a2a inbox --unclaimed` at
+natural pauses.
 
 ## Triage rules for incoming items
 

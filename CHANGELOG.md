@@ -2,6 +2,26 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `a2a --version` prints the running version.
 
+## 0.3.0
+
+- Session tracking: each `a2a wait` now registers a heartbeat under
+  `~/.a2a/sessions/`, and a new `a2a sessions` command lists the agent sessions
+  currently listening. Records are pruned when a session exits or stops
+  heartbeating. All file-based - no model tokens.
+- Targeted delivery: `send`/`reply`/`result` accept `--agent <name>` to address
+  a specific session of a peer. `reply`/`result` default to the originating
+  session automatically. `a2a wait` only wakes for items addressed to its own
+  `A2A_AGENT` (or broadcast), so N listeners no longer all wake per message.
+  `a2a inbox --mine` filters to items for this agent or broadcast.
+- Claim stealing: `a2a read` reclaims an item whose claiming session has died
+  (no heartbeat, or its pid is gone on the same machine) instead of refusing.
+- Undeliverable-target handling: if a targeted item's session never reappears,
+  the daemon (after a give-up window) either releases it to any session and
+  informs the sender (`--fallback broadcast`, default), keeps it pinned
+  (`--fallback hold`), or bounces an undeliverable notice back
+  (`--fallback bounce`). Reaping pauses for a grace period after the host wakes
+  from sleep so sessions can re-check in first.
+
 ## 0.2.0
 
 - New `a2a status` command reports whether the daemon is running, its version,

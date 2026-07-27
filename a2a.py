@@ -25,10 +25,12 @@ receiving agent triages them (see AGENTS.md).
 """
 
 import argparse
+import atexit
 import base64
 import json
 import os
 import secrets
+import signal
 import socket
 import subprocess
 import sys
@@ -39,7 +41,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 A2A_DIR = Path(os.environ.get("A2A_DIR", Path.home() / ".a2a"))
 CONFIG_PATH = A2A_DIR / "config.json"
@@ -48,12 +50,17 @@ OUTBOX_DIR = A2A_DIR / "outbox"
 FILES_DIR = A2A_DIR / "files"
 QUEUE_DIR = A2A_DIR / "queue"
 ACTIVITY_DIR = A2A_DIR / "activity"
+SESSIONS_DIR = A2A_DIR / "sessions"
 STATUS_PATH = A2A_DIR / "status.json"
 MAX_FILE_BYTES = 100 * 1024 * 1024
 KINDS = ("message", "task", "result")
 STATUSES = ("accepted", "working", "done", "failed")
+FALLBACKS = ("broadcast", "hold", "bounce")
 RETRY_INTERVAL = 45
 HEARTBEAT_INTERVAL = 5
+SESSION_LEASE = 75          # a session with no heartbeat in this long is treated as gone
+TARGET_GIVEUP = 300         # release a targeted item whose target never reappears after this
+SUSPEND_GAP = HEARTBEAT_INTERVAL * 6   # a maintenance tick later than this means the host slept
 
 
 def load_config():
@@ -63,7 +70,7 @@ def load_config():
 
 
 def ensure_dirs():
-    for d in (INBOX_DIR, OUTBOX_DIR, FILES_DIR, QUEUE_DIR, ACTIVITY_DIR):
+    for d in (INBOX_DIR, OUTBOX_DIR, FILES_DIR, QUEUE_DIR, ACTIVITY_DIR, SESSIONS_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -92,6 +99,63 @@ def new_id():
 
 def agent_name():
     return os.environ.get("A2A_AGENT", socket.gethostname())
+
+
+def is_pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def read_sessions():
+    out = {}
+    if not SESSIONS_DIR.exists():
+        return out
+    for p in SESSIONS_DIR.glob("*.json"):
+        try:
+            s = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        out[s.get("agent", p.stem)] = s
+    return out
+
+
+def session_alive(agent, sessions=None):
+    """A session is live if it heartbeated within the lease. Same-machine
+    sessions also fail fast if their pid is gone (reboot-safe: pid absent)."""
+    if sessions is None:
+        sessions = read_sessions()
+    s = sessions.get(agent)
+    if not s:
+        return False
+    if s.get("host") == socket.gethostname() and isinstance(s.get("pid"), int):
+        if not is_pid_alive(s["pid"]):
+            return False
+    return (time.time() - s.get("heartbeat", 0)) <= SESSION_LEASE
+
+
+def write_session(started, waiting_on="inbox"):
+    try:
+        SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+        me = agent_name()
+        (SESSIONS_DIR / f"{sanitize_filename(me)}.json").write_text(json.dumps({
+            "agent": me, "pid": os.getpid(), "host": socket.gethostname(),
+            "started": started, "heartbeat": time.time(), "waiting_on": waiting_on}))
+    except OSError:
+        pass
+
+
+def clear_session():
+    try:
+        (SESSIONS_DIR / f"{sanitize_filename(agent_name())}.json").unlink()
+    except OSError:
+        pass
 
 
 def sanitize_filename(name):
@@ -146,13 +210,17 @@ class Handler(BaseHTTPRequestHandler):
             "reply_to": str(item.get("reply_to", ""))[:64],
             "from": str(item.get("from", "unknown"))[:64],
             "from_agent": str(item.get("from_agent", ""))[:64],
+            "to_agent": str(item.get("to_agent", ""))[:64],
+            "fallback": item["fallback"] if item.get("fallback") in FALLBACKS else "broadcast",
             "kind": item["kind"],
             "status": item.get("status", ""),
             "text": str(item.get("text", ""))[:200_000],
             "meta": item.get("meta") if isinstance(item.get("meta"), dict) else {},
             "files": [],
             "received": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "received_ts": time.time(),
             "claimed_by": "",
+            "claimed_at": 0,
         }
         if stored["kind"] == "result" and stored["status"] not in STATUSES:
             self._json(400, {"error": f"result status must be one of {STATUSES}"})
@@ -214,23 +282,99 @@ def cmd_daemon(cfg, args):
 
 
 def _maintenance_loop(me, listen, started):
-    """Heartbeat the status file every tick, and drain queued items to
-    reachable peers periodically. Network is only touched when items queue."""
+    """Heartbeat the status file every tick, drain queued items to reachable
+    peers periodically, and reap dead sessions / stranded targeted items.
+    Network is only touched when items queue or a target is unreachable."""
     retry_every = max(1, RETRY_INTERVAL // HEARTBEAT_INTERVAL)
     tick = 0
+    last = time.time()
+    skip_reap_until = 0
     while True:
+        now = time.time()
+        if now - last > SUSPEND_GAP:
+            skip_reap_until = now + SESSION_LEASE   # host likely slept; let sessions re-check in
+        last = now
         write_status({"pid": os.getpid(), "version": __version__, "me": me,
-                      "listen": listen, "started": started, "heartbeat": time.time(),
+                      "listen": listen, "started": started, "heartbeat": now,
                       "queued": sum(1 for _ in QUEUE_DIR.glob("*/*.json"))})
-        if tick % retry_every == 0 and any(QUEUE_DIR.glob("*/*.json")):
-            try:
-                cfg = load_config()
-                for peer_name in cfg.get("peers", {}):
+        try:
+            cfg = load_config()
+        except (SystemExit, OSError, json.JSONDecodeError):
+            cfg = None
+        if cfg and tick % retry_every == 0 and any(QUEUE_DIR.glob("*/*.json")):
+            for peer_name in cfg.get("peers", {}):
+                try:
                     flush_queue(cfg, peer_name)
-            except (SystemExit, OSError):
+                except (SystemExit, OSError):
+                    pass
+        if cfg and now >= skip_reap_until:
+            try:
+                _reap(cfg)
+            except (SystemExit, OSError, json.JSONDecodeError):
                 pass
         tick += 1
         time.sleep(HEARTBEAT_INTERVAL)
+
+
+def _reap(cfg):
+    """Prune dead session records and release targeted items whose target
+    session never showed up (informing the original sender)."""
+    now = time.time()
+    sessions = read_sessions()
+    for name in list(sessions):
+        if not session_alive(name, sessions):
+            try:
+                (SESSIONS_DIR / f"{sanitize_filename(name)}.json").unlink()
+            except OSError:
+                pass
+            sessions.pop(name, None)
+    for p in INBOX_DIR.glob("*.json"):
+        try:
+            item = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        target = item.get("to_agent", "")
+        if (not target or item.get("claimed_by") or item.get("unpinned")
+                or item.get("bounced")):
+            continue
+        if session_alive(target, sessions):
+            continue
+        if now - item.get("received_ts", 0) < TARGET_GIVEUP:
+            continue
+        if item.get("fallback", "broadcast") == "hold":
+            continue
+        if item.get("fallback") == "bounce":
+            _notify_origin(cfg, item, target,
+                           f"Undeliverable: agent '{target}' was unreachable for your "
+                           f"{item.get('kind')} in thread {item.get('thread')}; not reassigned.",
+                           "undeliverable")
+            item["bounced"] = True
+        else:
+            _notify_origin(cfg, item, target,
+                           f"Reassigned: agent '{target}' was unreachable, so your "
+                           f"{item.get('kind')} in thread {item.get('thread')} has been "
+                           f"released for any of {cfg['me']}'s sessions to handle.",
+                           "reassigned")
+            item["unpinned"] = True
+            item["to_agent"] = ""
+        try:
+            p.write_text(json.dumps(item, indent=2))
+        except OSError:
+            pass
+
+
+def _notify_origin(cfg, item, target, text, intent):
+    peer = item.get("from", "")
+    if peer not in cfg.get("peers", {}):
+        return
+    payload = {"kind": "message", "text": text,
+               "thread": item.get("thread", ""), "reply_to": item.get("id", ""),
+               "to_agent": item.get("from_agent", ""),
+               "meta": {"a2a_intent": intent, "target": target}}
+    try:
+        deliver(cfg, peer, payload)
+    except SystemExit:
+        pass
 
 
 # ---------------- sending ----------------
@@ -359,6 +503,9 @@ def cmd_send(cfg, args):
         payload["status"] = "pending"
     if args.thread:
         payload["thread"] = args.thread
+    if args.agent:
+        payload["to_agent"] = args.agent
+        payload["fallback"] = args.fallback
     attach_files(payload, args.file)
     result = deliver(cfg, args.peer, payload)
     if result is None:
@@ -382,6 +529,10 @@ def cmd_reply(cfg, args):
         "reply_to": orig["id"],
         "meta": parse_meta(args.meta),
     }
+    target = args.agent or orig.get("from_agent") or ""
+    if target:
+        payload["to_agent"] = target
+        payload["fallback"] = args.fallback
     attach_files(payload, args.file)
     result = deliver(cfg, orig["from"], payload)
     if result is None:
@@ -401,6 +552,10 @@ def cmd_result(cfg, args):
         "reply_to": orig["id"],
         "meta": parse_meta(args.meta),
     }
+    target = args.agent or orig.get("from_agent") or ""
+    if target:
+        payload["to_agent"] = target
+        payload["fallback"] = args.fallback
     attach_files(payload, args.file)
     result = deliver(cfg, orig["from"], payload)
     if result is None:
@@ -449,10 +604,11 @@ def cmd_flush(cfg, args):
 def summarise(i, direction):
     who = f"from {i['from']}" if direction == "in" else f"to {i['to']}"
     status = f" [{i['status']}]" if i.get("status") else ""
+    target = f" ->{i['to_agent']}" if i.get("to_agent") else ""
     files = f" ({len(i['files'])} file{'s' if len(i['files']) != 1 else ''})" if i.get("files") else ""
     claimed = f" (claimed: {i['claimed_by']})" if i.get("claimed_by") else ""
     preview = i["text"][:80].replace("\n", " ")
-    return f"{i['id']}  {i['kind']:<7}{status} {who}{files}{claimed}  {preview}"
+    return f"{i['id']}  {i['kind']:<7}{status}{target} {who}{files}{claimed}  {preview}"
 
 
 def cmd_inbox(cfg, args):
@@ -460,6 +616,9 @@ def cmd_inbox(cfg, args):
     items = [json.loads(p.read_text()) for p in sorted(INBOX_DIR.glob("*.json"))]
     if args.unclaimed:
         items = [i for i in items if not i.get("claimed_by")]
+    if args.mine:
+        me = agent_name()
+        items = [i for i in items if not i.get("to_agent") or i.get("to_agent") == me]
     if not items:
         print("No unclaimed items" if args.unclaimed else "Inbox empty")
         return
@@ -472,8 +631,13 @@ def cmd_read(cfg, args):
     path = INBOX_DIR / f"{args.id}.json"
     item = find_inbox_item(args.id)
     me_agent = agent_name()
-    if item.get("claimed_by") and item["claimed_by"] != me_agent and not args.force:
-        sys.exit(f"Already claimed by agent '{item['claimed_by']}' - it is handling this "
+    target = item.get("to_agent", "")
+    if target and target != me_agent and not item.get("unpinned") and not args.force:
+        sys.exit(f"Item {args.id} is addressed to agent '{target}', not '{me_agent}'. "
+                 f"Leave it for that session, or use --force to handle it anyway.")
+    owner = item.get("claimed_by", "")
+    if owner and owner != me_agent and not args.force and session_alive(owner):
+        sys.exit(f"Already claimed by agent '{owner}' - it is handling this "
                  f"item (use --force to read anyway without claiming)")
     shown = {k: v for k, v in item.items() if k != "files"}
     shown["files"] = [f["filename"] for f in item["files"]]
@@ -482,8 +646,9 @@ def cmd_read(cfg, args):
         out = Path(args.out or ".") / f["filename"]
         out.write_bytes(Path(f["stored_path"]).read_bytes())
         print(f"File written to {out.resolve()}")
-    if not item.get("claimed_by"):
+    if not args.force and (not owner or owner == me_agent or not session_alive(owner)):
         item["claimed_by"] = me_agent
+        item["claimed_at"] = time.time()
         path.write_text(json.dumps(item, indent=2))
 
 
@@ -504,21 +669,47 @@ def cmd_thread(cfg, args):
 
 def cmd_wait(cfg, args):
     ensure_dirs()
+    me = agent_name()
+    started = time.strftime("%Y-%m-%d %H:%M:%S")
+    atexit.register(clear_session)
+    signal.signal(signal.SIGTERM, lambda *a: (clear_session(), sys.exit(0)))
     known = {p.name for p in INBOX_DIR.glob("*.json")}
     deadline = time.time() + args.timeout if args.timeout else None
     while True:
-        new = {p.name for p in INBOX_DIR.glob("*.json")} - known
-        if new:
-            for name in sorted(new):
-                item = json.loads((INBOX_DIR / name).read_text())
+        write_session(started)
+        mine = []
+        for name in sorted({p.name for p in INBOX_DIR.glob("*.json")} - known):
+            item = json.loads((INBOX_DIR / name).read_text())
+            target = item.get("to_agent", "")
+            if target and target != me:
+                continue   # addressed to another session; leave it in play, re-check next tick
+            mine.append(item)
+        if mine:
+            for item in mine:
                 status = f" [{item['status']}]" if item.get("status") else ""
                 print(f"NEW {item['kind']}{status} from {item['from']}: "
                       f"id {item['id']}, thread {item['thread']}")
+            clear_session()
             return
         if deadline and time.time() > deadline:
             print("Timed out with no new items")
+            clear_session()
             sys.exit(2)
         time.sleep(1)
+
+
+def cmd_sessions(cfg, args):
+    ensure_dirs()
+    sessions = read_sessions()
+    now = time.time()
+    live = sorted((n, s) for n, s in sessions.items() if session_alive(n, sessions))
+    if not live:
+        print("No live agent sessions")
+        return
+    for name, s in live:
+        age = now - s.get("heartbeat", 0)
+        print(f"{name}  host {s.get('host', '?')} pid {s.get('pid', '?')}  "
+              f"heartbeat {age:.0f}s ago  waiting on {s.get('waiting_on', '?')}")
 
 
 def cmd_introduce(cfg, args):
@@ -547,6 +738,7 @@ def cmd_accept(cfg, args):
     cfg.setdefault("peers", {})[name] = {"url": url, "token": token}
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
     item["claimed_by"] = agent_name()
+    item["claimed_at"] = time.time()
     (INBOX_DIR / f"{item['id']}.json").write_text(json.dumps(item, indent=2))
     payload = {"kind": "message",
                "text": f"{cfg['me']} accepted your introduction - connected.",
@@ -611,12 +803,18 @@ def main():
     sp.add_argument("--file", "-f", action="append")
     sp.add_argument("--meta", action="append", help="key=value, repeatable")
     sp.add_argument("--thread", help="continue an existing thread")
+    sp.add_argument("--agent", help="address a specific session of the peer (see: a2a sessions)")
+    sp.add_argument("--fallback", choices=FALLBACKS, default="broadcast",
+                    help="if the target session never appears: broadcast (release to any), "
+                         "hold (keep pinned), bounce (return undeliverable to you)")
 
     sp = sub.add_parser("reply", help="reply to an inbox item (peer/thread inferred)")
     sp.add_argument("id")
     sp.add_argument("--message", "-m", required=True)
     sp.add_argument("--file", "-f", action="append")
     sp.add_argument("--meta", action="append")
+    sp.add_argument("--agent", help="override the target session (defaults to the sender's)")
+    sp.add_argument("--fallback", choices=FALLBACKS, default="broadcast")
 
     sp = sub.add_parser("result", help="send a task status/result back to its sender")
     sp.add_argument("id", help="the inbox task item id")
@@ -624,9 +822,13 @@ def main():
     sp.add_argument("--message", "-m")
     sp.add_argument("--file", "-f", action="append")
     sp.add_argument("--meta", action="append")
+    sp.add_argument("--agent", help="override the target session (defaults to the sender's)")
+    sp.add_argument("--fallback", choices=FALLBACKS, default="broadcast")
 
     sp = sub.add_parser("inbox", help="list received items")
     sp.add_argument("--unclaimed", action="store_true")
+    sp.add_argument("--mine", action="store_true",
+                    help="only items addressed to this agent or broadcast")
 
     sp = sub.add_parser("read", help="show an item (writes files to cwd), claim it for this agent")
     sp.add_argument("id")
@@ -656,13 +858,15 @@ def main():
 
     sub.add_parser("status", help="report whether the daemon is running")
 
+    sub.add_parser("sessions", help="list agent sessions currently listening")
+
     args = p.parse_args()
     cfg = None if args.cmd == "init" else load_config()
     {"init": cmd_init, "daemon": cmd_daemon, "send": cmd_send, "reply": cmd_reply,
      "result": cmd_result, "inbox": cmd_inbox, "read": cmd_read, "peer": cmd_peer,
      "introduce": cmd_introduce, "accept": cmd_accept,
      "thread": cmd_thread, "wait": cmd_wait, "flush": cmd_flush,
-     "status": cmd_status}[args.cmd](cfg, args)
+     "status": cmd_status, "sessions": cmd_sessions}[args.cmd](cfg, args)
 
 
 if __name__ == "__main__":

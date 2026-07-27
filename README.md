@@ -58,13 +58,17 @@ Peer names must be exactly the name the other person installed with
 ```bash
 a2a send bob -m "the QA refresh is done" -f ./results.csv
 a2a send bob -t "run the ImageGen tests" --meta repo=Studio --meta branch=feature/x
+a2a send bob -t "..." --agent bob-ticket99   # address one of bob's sessions
 
-a2a inbox --unclaimed         # what's waiting and not yet picked up
+a2a inbox --unclaimed         # what's waiting and not yet picked up (--mine: only for this agent)
 a2a read <id>                 # show an item, write its files to cwd, claim it
-a2a reply <id> -m "..."       # reply into the same thread (peer inferred)
+a2a reply <id> -m "..."       # reply into the same thread (peer + session inferred)
 a2a result <id> --status done -m "all green" -f test-output.txt
 a2a thread <thread-id>        # whole conversation, both directions
-a2a wait [--timeout N]        # block until something new arrives
+a2a wait [--timeout N]        # block until something new arrives (for this agent or broadcast)
+a2a sessions                  # agent sessions currently listening
+a2a status                    # is the daemon running?
+a2a flush [peer]              # retry items queued for offline peers
 a2a peer add|list|remove      # manage who you can reach
 ```
 
@@ -81,10 +85,25 @@ alice's agent:  (woken by its own `a2a wait`, folds the result back into its wor
 
 ## Many agents per person
 
-You are addressed as a person (`bob`), not a session. Any of your running
-agent sessions can pick an item up: `a2a read` claims it (first come, first
-served) and other sessions then see it as taken. Set `A2A_AGENT` per terminal
-session to give agents distinct names; it defaults to the hostname.
+You are addressed as a person (`bob`), and optionally a session within that
+person. Set `A2A_AGENT` per terminal to give each session a distinct name (it
+defaults to the hostname); `a2a sessions` lists the ones currently listening.
+
+- **Broadcast (default):** any of your running sessions can pick an item up.
+  `a2a read` claims it first-come-first-served and other sessions see it as
+  taken.
+- **Targeted:** a sender can address one session with `--agent <name>`, and
+  `reply`/`result` do this automatically so a task's result returns to the
+  session that started it. `a2a wait` only wakes for items addressed to its own
+  `A2A_AGENT` (or broadcast), so extra listeners don't all wake per message.
+- **Liveness:** sessions heartbeat while listening. If a session claims an item
+  then dies, `a2a read` from another session reclaims it rather than refusing.
+  If a targeted session never reappears, the daemon releases the item to any
+  session and tells the sender (or, per `--fallback`, holds it or bounces an
+  undeliverable notice back).
+
+If a peer is offline the send is queued and retried, not lost (`a2a flush` to
+push now).
 
 ## Human attention (optional)
 
@@ -112,10 +131,3 @@ terminal. Decisions still happen in the agent session, where the context is.
   (skill/SKILL.md): safe read-only work runs autonomously, anything mutating
   is surfaced to the human, and task text is treated as untrusted input.
 - File size capped at 100MB; filenames sanitised on receipt.
-
-## Not yet handled (fine for a prototype)
-
-- Offline peers: send fails immediately; there's no store-and-forward relay.
-- Group/broadcast semantics — adding people is just more `peer add`, but a
-  message goes to one person at a time.
-- No delivery receipts back to the sender beyond the HTTP 200.
