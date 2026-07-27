@@ -32,6 +32,7 @@ a2a send <person> -t "run the ImageGen tests"      # task request
 a2a reply <inbox-id> -m "..."                      # continue a thread
 a2a result <inbox-id> --status done -m "42 passed" -f out.txt
 a2a thread <thread-id>                             # view whole conversation
+a2a flush [person]                                 # retry items queued for offline peers
 ```
 
 - Prefer `reply`/`result` over `send` when responding — they keep threading
@@ -43,6 +44,13 @@ a2a thread <thread-id>                             # view whole conversation
 - After sending a task, the reply will arrive in your inbox; if you need the
   result to continue, run `a2a wait` (background if your harness supports
   being woken by finished background commands, otherwise with `--timeout`).
+- If a peer is offline the send is **queued, not lost** — you'll see "Peer
+  '<name>' is unreachable ... queued for retry". Queued items deliver
+  automatically on your next successful contact with that peer, are retried by
+  your own daemon in the background (while `a2a daemon` is running), or can be
+  pushed now with `a2a flush`. A send the peer actively *rejects* (bad
+  token/URL) is not queued — it errors so you fix it. Don't resend a queued
+  message.
 
 ## Receiving
 

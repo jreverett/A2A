@@ -32,20 +32,25 @@ import secrets
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+__version__ = "0.1.0"
+
 A2A_DIR = Path(os.environ.get("A2A_DIR", Path.home() / ".a2a"))
 CONFIG_PATH = A2A_DIR / "config.json"
 INBOX_DIR = A2A_DIR / "inbox"
 OUTBOX_DIR = A2A_DIR / "outbox"
 FILES_DIR = A2A_DIR / "files"
+QUEUE_DIR = A2A_DIR / "queue"
 MAX_FILE_BYTES = 100 * 1024 * 1024
 KINDS = ("message", "task", "result")
 STATUSES = ("accepted", "working", "done", "failed")
+RETRY_INTERVAL = 45
 
 
 def load_config():
@@ -55,7 +60,7 @@ def load_config():
 
 
 def ensure_dirs():
-    for d in (INBOX_DIR, OUTBOX_DIR, FILES_DIR):
+    for d in (INBOX_DIR, OUTBOX_DIR, FILES_DIR, QUEUE_DIR):
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -177,9 +182,25 @@ def cmd_daemon(cfg, args):
     Handler.token = cfg["token"]
     Handler.notify_command = cfg.get("notify_command")
     scope = "tailnet-only" if listen.get("host", "auto") == "auto" else "custom bind"
-    print(f"a2a daemon: {cfg['me']} listening on {host}:{port} ({scope}), inbox {INBOX_DIR}",
+    print(f"a2a v{__version__} daemon: {cfg['me']} listening on {host}:{port} ({scope}), inbox {INBOX_DIR}",
           flush=True)
+    threading.Thread(target=_retry_loop, daemon=True).start()
     ThreadingHTTPServer((host, port), Handler).serve_forever()
+
+
+def _retry_loop():
+    """Background: drain queued items once a peer is reachable again.
+    Only touches the network when items are actually queued."""
+    while True:
+        time.sleep(RETRY_INTERVAL)
+        if not any(QUEUE_DIR.glob("*/*.json")):
+            continue
+        try:
+            cfg = load_config()
+        except SystemExit:
+            continue
+        for peer_name in cfg.get("peers", {}):
+            flush_queue(cfg, peer_name)
 
 
 # ---------------- sending ----------------
@@ -194,10 +215,9 @@ def parse_meta(pairs):
     return meta
 
 
-def deliver(cfg, peer_name, payload):
-    peer = cfg.get("peers", {}).get(peer_name)
-    if not peer:
-        sys.exit(f"Unknown peer '{peer_name}'. Known: {', '.join(cfg.get('peers', {}))}")
+def _post(cfg, peer, payload):
+    """Send one payload to a peer. Raises URLError if unreachable,
+    HTTPError if the peer is reachable but rejects it."""
     payload["from"] = cfg["me"]
     payload["from_agent"] = agent_name()
     req = urllib.request.Request(
@@ -206,19 +226,76 @@ def deliver(cfg, peer_name, payload):
         headers={"Content-Type": "application/json",
                  "Authorization": f"Bearer {peer['token']}"},
     )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read())
-    except urllib.error.URLError as e:
-        sys.exit(f"Send to {peer_name} failed: {e}")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
 
+
+def _record_outbox(payload, result, peer_name):
     ensure_dirs()
     record = dict(payload)
+    record.pop("_qid", None)
     for f in record.get("files", []):
         f.pop("data_b64", None)
     record.update(id=result["id"], thread=result["thread"], to=peer_name,
                   sent=time.strftime("%Y-%m-%d %H:%M:%S"))
     (OUTBOX_DIR / f"{result['id']}.json").write_text(json.dumps(record, indent=2))
+
+
+def enqueue(peer_name, payload):
+    d = QUEUE_DIR / sanitize_filename(peer_name)
+    d.mkdir(parents=True, exist_ok=True)
+    payload.setdefault("_qid", new_id())
+    (d / f"{payload['_qid']}.json").write_text(json.dumps(payload))
+    return len(list(d.glob("*.json")))
+
+
+def flush_queue(cfg, peer_name, verbose=False):
+    """Retry queued items for a peer, oldest first. Stops at the first
+    unreachable error (peer still down); drops items the peer rejects."""
+    peer = cfg.get("peers", {}).get(peer_name)
+    d = QUEUE_DIR / sanitize_filename(peer_name)
+    if not peer or not d.exists():
+        return 0
+    sent = 0
+    for f in sorted(d.glob("*.json")):
+        payload = json.loads(f.read_text())
+        try:
+            result = _post(cfg, peer, payload)
+        except urllib.error.HTTPError as e:
+            f.unlink()
+            if verbose:
+                print(f"  dropped queued item for {peer_name}: rejected ({e.code})")
+            continue
+        except urllib.error.URLError:
+            break
+        _record_outbox(payload, result, peer_name)
+        f.unlink()
+        sent += 1
+    if sent and verbose:
+        print(f"Flushed {sent} queued item(s) to {peer_name}")
+    return sent
+
+
+def deliver(cfg, peer_name, payload, queue_on_fail=True):
+    peer = cfg.get("peers", {}).get(peer_name)
+    if not peer:
+        sys.exit(f"Unknown peer '{peer_name}'. Known: {', '.join(cfg.get('peers', {}))}")
+    flush_queue(cfg, peer_name)
+    try:
+        result = _post(cfg, peer, payload)
+    except urllib.error.HTTPError as e:
+        sys.exit(f"Send to {peer_name} rejected ({e.code} {e.reason}) - "
+                 f"check the peer token/URL; not queued.")
+    except urllib.error.URLError as e:
+        if not queue_on_fail:
+            sys.exit(f"Send to {peer_name} failed: {e.reason}")
+        depth = enqueue(peer_name, payload)
+        reason = getattr(e, "reason", e)
+        print(f"Peer '{peer_name}' is unreachable ({reason}) - queued for retry "
+              f"({depth} pending). Delivers on next contact, or run: a2a flush {peer_name}")
+        return None
+
+    _record_outbox(payload, result, peer_name)
     return result
 
 
@@ -253,6 +330,8 @@ def cmd_send(cfg, args):
         payload["thread"] = args.thread
     attach_files(payload, args.file)
     result = deliver(cfg, args.peer, payload)
+    if result is None:
+        return
     print(f"Delivered to {args.peer}: {payload['kind']} id {result['id']}, thread {result['thread']}")
 
 
@@ -274,6 +353,8 @@ def cmd_reply(cfg, args):
     }
     attach_files(payload, args.file)
     result = deliver(cfg, orig["from"], payload)
+    if result is None:
+        return
     print(f"Replied to {orig['from']} in thread {orig['thread']} (id {result['id']})")
 
 
@@ -291,7 +372,28 @@ def cmd_result(cfg, args):
     }
     attach_files(payload, args.file)
     result = deliver(cfg, orig["from"], payload)
+    if result is None:
+        return
     print(f"Sent {args.status} result to {orig['from']} in thread {orig['thread']} (id {result['id']})")
+
+
+def queued_count(peer_name):
+    d = QUEUE_DIR / sanitize_filename(peer_name)
+    return len(list(d.glob("*.json"))) if d.exists() else 0
+
+
+def cmd_flush(cfg, args):
+    peers = [args.peer] if args.peer else list(cfg.get("peers", {}))
+    queued = {name: queued_count(name) for name in peers}
+    if not any(queued.values()):
+        print(f"Nothing queued for {args.peer}." if args.peer else "Nothing to flush.")
+        return
+    for name, pending in queued.items():
+        if pending:
+            flush_queue(cfg, name, verbose=True)
+            left = queued_count(name)
+            if left:
+                print(f"{name}: still unreachable, {left} item(s) remain queued.")
 
 
 # ---------------- inbox / threads ----------------
@@ -444,6 +546,7 @@ def cmd_init(cfg_unused, args):
 
 def main():
     p = argparse.ArgumentParser(prog="a2a", description=__doc__.split("\n")[0])
+    p.add_argument("--version", action="version", version=f"a2a {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("init", help="create ~/.a2a/config.json")
@@ -500,12 +603,15 @@ def main():
     sp = sub.add_parser("wait", help="block until a new item arrives")
     sp.add_argument("--timeout", type=int, default=0)
 
+    sp = sub.add_parser("flush", help="retry items queued for unreachable peers")
+    sp.add_argument("peer", nargs="?", help="a single peer (default: all)")
+
     args = p.parse_args()
     cfg = None if args.cmd == "init" else load_config()
     {"init": cmd_init, "daemon": cmd_daemon, "send": cmd_send, "reply": cmd_reply,
      "result": cmd_result, "inbox": cmd_inbox, "read": cmd_read, "peer": cmd_peer,
      "introduce": cmd_introduce, "accept": cmd_accept,
-     "thread": cmd_thread, "wait": cmd_wait}[args.cmd](cfg, args)
+     "thread": cmd_thread, "wait": cmd_wait, "flush": cmd_flush}[args.cmd](cfg, args)
 
 
 if __name__ == "__main__":
