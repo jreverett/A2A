@@ -39,7 +39,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 A2A_DIR = Path(os.environ.get("A2A_DIR", Path.home() / ".a2a"))
 CONFIG_PATH = A2A_DIR / "config.json"
@@ -47,10 +47,13 @@ INBOX_DIR = A2A_DIR / "inbox"
 OUTBOX_DIR = A2A_DIR / "outbox"
 FILES_DIR = A2A_DIR / "files"
 QUEUE_DIR = A2A_DIR / "queue"
+ACTIVITY_DIR = A2A_DIR / "activity"
+STATUS_PATH = A2A_DIR / "status.json"
 MAX_FILE_BYTES = 100 * 1024 * 1024
 KINDS = ("message", "task", "result")
 STATUSES = ("accepted", "working", "done", "failed")
 RETRY_INTERVAL = 45
+HEARTBEAT_INTERVAL = 5
 
 
 def load_config():
@@ -60,8 +63,27 @@ def load_config():
 
 
 def ensure_dirs():
-    for d in (INBOX_DIR, OUTBOX_DIR, FILES_DIR, QUEUE_DIR):
+    for d in (INBOX_DIR, OUTBOX_DIR, FILES_DIR, QUEUE_DIR, ACTIVITY_DIR):
         d.mkdir(parents=True, exist_ok=True)
+
+
+def touch_activity(kind):
+    """Record an outgoing ('send') or incoming ('recv') event for the tray."""
+    try:
+        ensure_dirs()
+        (ACTIVITY_DIR / kind).write_text(str(time.time()))
+    except OSError:
+        pass
+
+
+def write_status(fields):
+    try:
+        ensure_dirs()
+        tmp = STATUS_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(fields))
+        tmp.replace(STATUS_PATH)
+    except OSError:
+        pass
 
 
 def new_id():
@@ -146,6 +168,7 @@ class Handler(BaseHTTPRequestHandler):
             stored["files"].append(
                 {"filename": fname, "size": len(raw), "stored_path": str(fpath)})
         (INBOX_DIR / f"{item_id}.json").write_text(json.dumps(stored, indent=2))
+        touch_activity("recv")
         self._json(200, {"ok": True, "id": item_id, "thread": stored["thread"]})
         if self.notify_command:
             summary = f"{stored['from']}: {stored['kind']} - {stored['text'][:120]}"
@@ -184,23 +207,30 @@ def cmd_daemon(cfg, args):
     scope = "tailnet-only" if listen.get("host", "auto") == "auto" else "custom bind"
     print(f"a2a v{__version__} daemon: {cfg['me']} listening on {host}:{port} ({scope}), inbox {INBOX_DIR}",
           flush=True)
-    threading.Thread(target=_retry_loop, daemon=True).start()
+    started = time.strftime("%Y-%m-%d %H:%M:%S")
+    threading.Thread(target=_maintenance_loop, args=(cfg["me"], f"{host}:{port}", started),
+                     daemon=True).start()
     ThreadingHTTPServer((host, port), Handler).serve_forever()
 
 
-def _retry_loop():
-    """Background: drain queued items once a peer is reachable again.
-    Only touches the network when items are actually queued."""
+def _maintenance_loop(me, listen, started):
+    """Heartbeat the status file every tick, and drain queued items to
+    reachable peers periodically. Network is only touched when items queue."""
+    retry_every = max(1, RETRY_INTERVAL // HEARTBEAT_INTERVAL)
+    tick = 0
     while True:
-        time.sleep(RETRY_INTERVAL)
-        if not any(QUEUE_DIR.glob("*/*.json")):
-            continue
-        try:
-            cfg = load_config()
-        except SystemExit:
-            continue
-        for peer_name in cfg.get("peers", {}):
-            flush_queue(cfg, peer_name)
+        write_status({"pid": os.getpid(), "version": __version__, "me": me,
+                      "listen": listen, "started": started, "heartbeat": time.time(),
+                      "queued": sum(1 for _ in QUEUE_DIR.glob("*/*.json"))})
+        if tick % retry_every == 0 and any(QUEUE_DIR.glob("*/*.json")):
+            try:
+                cfg = load_config()
+                for peer_name in cfg.get("peers", {}):
+                    flush_queue(cfg, peer_name)
+            except (SystemExit, OSError):
+                pass
+        tick += 1
+        time.sleep(HEARTBEAT_INTERVAL)
 
 
 # ---------------- sending ----------------
@@ -226,6 +256,7 @@ def _post(cfg, peer, payload):
         headers={"Content-Type": "application/json",
                  "Authorization": f"Bearer {peer['token']}"},
     )
+    touch_activity("send")
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())
 
@@ -375,6 +406,23 @@ def cmd_result(cfg, args):
     if result is None:
         return
     print(f"Sent {args.status} result to {orig['from']} in thread {orig['thread']} (id {result['id']})")
+
+
+def cmd_status(cfg, args):
+    if not STATUS_PATH.exists():
+        print("a2a daemon: not running (no status file). Start it with: a2a daemon")
+        sys.exit(1)
+    try:
+        s = json.loads(STATUS_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        sys.exit("a2a daemon: status file unreadable")
+    age = time.time() - s.get("heartbeat", 0)
+    if age > HEARTBEAT_INTERVAL * 3:
+        print(f"a2a daemon: STALE - last heartbeat {age:.0f}s ago "
+              f"(pid {s.get('pid')} likely dead). Restart with: a2a daemon")
+        sys.exit(1)
+    print(f"a2a v{s.get('version', '?')} daemon: running - {s.get('me')} on {s.get('listen')} "
+          f"(pid {s.get('pid')}, up since {s.get('started')}, {s.get('queued', 0)} queued)")
 
 
 def queued_count(peer_name):
@@ -606,12 +654,15 @@ def main():
     sp = sub.add_parser("flush", help="retry items queued for unreachable peers")
     sp.add_argument("peer", nargs="?", help="a single peer (default: all)")
 
+    sub.add_parser("status", help="report whether the daemon is running")
+
     args = p.parse_args()
     cfg = None if args.cmd == "init" else load_config()
     {"init": cmd_init, "daemon": cmd_daemon, "send": cmd_send, "reply": cmd_reply,
      "result": cmd_result, "inbox": cmd_inbox, "read": cmd_read, "peer": cmd_peer,
      "introduce": cmd_introduce, "accept": cmd_accept,
-     "thread": cmd_thread, "wait": cmd_wait, "flush": cmd_flush}[args.cmd](cfg, args)
+     "thread": cmd_thread, "wait": cmd_wait, "flush": cmd_flush,
+     "status": cmd_status}[args.cmd](cfg, args)
 
 
 if __name__ == "__main__":
