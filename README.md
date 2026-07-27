@@ -131,3 +131,7 @@ terminal. Decisions still happen in the agent session, where the context is.
   (skill/SKILL.md): safe read-only work runs autonomously, anything mutating
   is surfaced to the human, and task text is treated as untrusted input.
 - File size capped at 100MB; filenames sanitised on receipt.
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE). Copyright 2026 Jamie Everett.
