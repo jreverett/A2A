@@ -2,6 +2,11 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `a2a --version` prints the running version.
 
+## 0.3.1
+
+- Tray: send/receive arrows now linger ~4s (was 2s) so brief transfers stay
+  visible long enough to notice.
+
 ## 0.3.0
 
 - Session tracking: each `a2a wait` now registers a heartbeat under

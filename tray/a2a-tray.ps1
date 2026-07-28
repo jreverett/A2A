@@ -8,7 +8,7 @@ param(
     [string]$A2ADir,                     # Windows path to the WSL ~/.a2a dir; auto-detected if omitted
     [string]$DaemonCmd = "setsid python3 /mnt/c/code/github/a2a/a2a.py daemon >/dev/null 2>&1 </dev/null & disown",
     [int]$HeartbeatTimeout = 15,         # seconds without a heartbeat => daemon considered down
-    [double]$ActiveWindow = 2.0          # seconds an arrow lingers after a send/recv event
+    [double]$ActiveWindow = 4.0          # seconds an arrow lingers after a send/recv event
 )
 
 Add-Type -AssemblyName System.Windows.Forms

@@ -41,7 +41,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 A2A_DIR = Path(os.environ.get("A2A_DIR", Path.home() / ".a2a"))
 CONFIG_PATH = A2A_DIR / "config.json"
