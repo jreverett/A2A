@@ -2,6 +2,14 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `a2a --version` prints the running version.
 
+## 0.3.4
+
+- Tray "Restart daemon" is now machine-agnostic. It hardcoded one machine's repo
+  path (a silent no-op on any other clone) and would spawn a second daemon
+  competing for the port on a systemd install rather than restarting the managed
+  one. It now restarts the systemd service when present, otherwise falls back to
+  the `a2a` PATH wrapper the installer creates - no hardcoded paths.
+
 ## 0.3.3
 
 - Fix tray cold-boot: the tray resolved the WSL `~/.a2a` path only once at

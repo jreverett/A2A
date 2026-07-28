@@ -6,7 +6,7 @@
 
 param(
     [string]$A2ADir,                     # Windows path to the WSL ~/.a2a dir; auto-detected if omitted
-    [string]$DaemonCmd = "setsid python3 /mnt/c/code/github/a2a/a2a.py daemon >/dev/null 2>&1 </dev/null & disown",
+    [string]$DaemonCmd = "if systemctl --user cat a2a-daemon.service >/dev/null 2>&1; then systemctl --user restart a2a-daemon; else pkill -f '[a]2a.py daemon' 2>/dev/null; setsid `"`$HOME/.local/bin/a2a`" daemon >/dev/null 2>&1 </dev/null & disown; fi",  # systemd if present, else the PATH wrapper - machine-agnostic
     [int]$HeartbeatTimeout = 15,         # seconds without a heartbeat => daemon considered down
     [double]$ActiveWindow = 4.0          # seconds an arrow lingers after a send/recv event
 )
