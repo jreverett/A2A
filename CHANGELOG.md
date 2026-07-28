@@ -2,6 +2,17 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `a2a --version` prints the running version.
 
+## 0.3.2
+
+- The installer now sets up the Windows tray indicator automatically on
+  WSL-with-Windows (previously a separate manual `setup-tray.ps1` step), so a
+  normal install gives you the icon at every login with no extra step.
+- `setup-tray.ps1` now installs a hidden VBScript launcher instead of a Startup
+  shortcut to `powershell.exe`. A detached/shortcut launch from WSL or a script
+  doesn't attach to the interactive desktop and paints its icon invisibly;
+  wscript spawns the tray as a child that inherits the visible desktop, so the
+  icon appears both at login and immediately on `enable`.
+
 ## 0.3.1
 
 - Tray: send/receive arrows now linger ~4s (was 2s) so brief transfers stay

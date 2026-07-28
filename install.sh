@@ -64,6 +64,7 @@ banner "a2a setup - agent-to-agent messaging" \
        "  2. Write ~/.a2a/config.json and put 'a2a' on your PATH" \
        "  3. Teach your agents the a2a protocol (skill / instructions)" \
        "  4. Start the a2a receiver daemon" \
+       "  5. (On Windows) Add a system-tray status icon" \
        "" \
        "Security - nothing is exposed outside your private network:" \
        "  - The daemon binds ONLY to the Tailscale interface. No port is" \
@@ -179,6 +180,16 @@ EOF
   fi
 else
   echo "No systemd; start the daemon manually: nohup a2a daemon >~/.a2a/daemon.log 2>&1 &"
+fi
+
+# 4.5 Windows tray indicator (only on WSL-with-Windows; skipped cleanly elsewhere)
+if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && command -v powershell.exe >/dev/null 2>&1; then
+  TRAY_SETUP_WIN=$(wslpath -w "$REPO_DIR/tray/setup-tray.ps1" 2>/dev/null || true)
+  if [ -n "$TRAY_SETUP_WIN" ]; then
+    spin "Adding Windows tray indicator" \
+      powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$TRAY_SETUP_WIN" enable || true
+    echo "  Tray icon starts at login (and now, if a desktop is available)."
+  fi
 fi
 
 # 5. connect to a peer and introduce myself (their side runs `a2a accept`)

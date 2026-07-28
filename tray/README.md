@@ -28,8 +28,18 @@ balloon.
 
 ## Auto-start on login
 
+The main `install.sh` does this automatically on WSL-with-Windows, so a normal
+install already gives you the icon at every login. To manage it by hand:
+
 ```powershell
-powershell -ExecutionPolicy Bypass -File setup-tray.ps1 enable    # add Startup shortcut
+powershell -ExecutionPolicy Bypass -File setup-tray.ps1 enable    # start at login + now
 powershell -ExecutionPolicy Bypass -File setup-tray.ps1 disable   # remove it
 powershell -ExecutionPolicy Bypass -File setup-tray.ps1 status
 ```
+
+`enable` installs a hidden VBScript launcher (`a2a-tray.vbs`) in the Startup
+folder and starts the tray immediately. The `.vbs`/`wscript` indirection is
+deliberate: a detached `Start-Process`/shortcut to `powershell.exe` launched from
+WSL or a script does not attach to the interactive desktop, so its icon paints to
+an invisible window station. wscript spawns the tray as a child that inherits the
+visible desktop, so the icon actually appears - both at login and right away.
