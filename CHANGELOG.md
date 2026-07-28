@@ -2,6 +2,21 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `a2a --version` prints the running version.
 
+## 0.3.3
+
+- Fix tray cold-boot: the tray resolved the WSL `~/.a2a` path only once at
+  startup, so when it launched at login before WSL was warm the path stayed
+  null and the icon pinned to grey "offline" permanently. Resolution is now
+  retried lazily in the poll loop, so a cold-boot tray self-heals as soon as
+  WSL answers.
+- Fix reply mis-targeting: outbound items now stamp `from_agent` only when
+  `A2A_AGENT` is explicitly set. Previously it defaulted to the hostname, so a
+  sender whose listener ran under a different name (the recommended convention)
+  had every reply targeted at a session that never listens - held until the
+  give-up window, then broadcast with a spurious "reassigned" notice. Unset now
+  means broadcast, so replies reach any of the person's listeners immediately.
+  To receive targeted replies, send and listen under the same `A2A_AGENT`.
+
 ## 0.3.2
 
 - The installer now sets up the Windows tray indicator automatically on

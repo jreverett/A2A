@@ -26,20 +26,31 @@ function Get-BarTheme {
     return 'dark'
 }
 
-# Resolve the WSL ~/.a2a directory as a Windows path, once, unless supplied.
-if (-not $A2ADir) {
+# Resolve the WSL ~/.a2a directory as a Windows path. At login the tray starts
+# before WSL is warm, so this can return nothing; it is retried lazily in
+# Poll-State rather than resolved only once - otherwise a cold boot would pin
+# the icon to 'offline' forever even after WSL and the daemon come up.
+function Resolve-A2ADir {
     try {
         $prev = [Console]::OutputEncoding
         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-        $A2ADir = (& wsl.exe -e bash -lc "wslpath -w ~/.a2a" 2>$null | Select-Object -First 1)
+        $d = (& wsl.exe -e bash -lc "wslpath -w ~/.a2a" 2>$null | Select-Object -First 1)
         [Console]::OutputEncoding = $prev
-        if ($A2ADir) { $A2ADir = $A2ADir.Trim() }
-    } catch { $A2ADir = $null }
+        if ($d) { return $d.Trim() }
+    } catch {}
+    return $null
 }
 
-$script:statusPath = if ($A2ADir) { Join-Path $A2ADir "status.json" } else { $null }
-$script:sendMarker = if ($A2ADir) { Join-Path $A2ADir "activity\send" } else { $null }
-$script:recvMarker = if ($A2ADir) { Join-Path $A2ADir "activity\recv" } else { $null }
+function Set-A2APaths($dir) {
+    $script:a2aDir     = $dir
+    $script:statusPath = if ($dir) { Join-Path $dir "status.json" } else { $null }
+    $script:sendMarker = if ($dir) { Join-Path $dir "activity\send" } else { $null }
+    $script:recvMarker = if ($dir) { Join-Path $dir "activity\recv" } else { $null }
+}
+
+$script:lastResolve = 0
+if (-not $A2ADir) { $A2ADir = Resolve-A2ADir }
+Set-A2APaths $A2ADir
 
 $script:FrameCount = 8
 $script:icons = @{ dark = @{}; light = @{} }
@@ -75,6 +86,10 @@ $script:state = 'offline'
 # Runs on a throttle (not every animation frame) to keep \\wsl$ reads light.
 function Poll-State {
     $now = Now-Unix
+    if (-not $script:a2aDir -and ($now - $script:lastResolve) -ge 5) {
+        $script:lastResolve = $now
+        Set-A2APaths (Resolve-A2ADir)   # cold-boot self-heal: retry until WSL answers
+    }
     $status = $null
     if ($script:statusPath -and (Test-Path $script:statusPath)) {
         try { $status = Get-Content -Raw $script:statusPath | ConvertFrom-Json } catch { $status = $null }

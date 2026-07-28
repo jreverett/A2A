@@ -41,7 +41,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-__version__ = "0.3.2"
+__version__ = "0.3.3"
 
 A2A_DIR = Path(os.environ.get("A2A_DIR", Path.home() / ".a2a"))
 CONFIG_PATH = A2A_DIR / "config.json"
@@ -99,6 +99,14 @@ def new_id():
 
 def agent_name():
     return os.environ.get("A2A_AGENT", socket.gethostname())
+
+
+def sender_agent():
+    """Agent name stamped on outbound items so replies can target this session.
+    Only an explicitly-set A2A_AGENT is used; unset stays blank so replies
+    broadcast, never the hostname default (a hostname is a machine, not a
+    listening session, so targeting it is guaranteed-undeliverable)."""
+    return os.environ.get("A2A_AGENT", "")
 
 
 def is_pid_alive(pid):
@@ -393,7 +401,7 @@ def _post(cfg, peer, payload):
     """Send one payload to a peer. Raises URLError if unreachable,
     HTTPError if the peer is reachable but rejects it."""
     payload["from"] = cfg["me"]
-    payload["from_agent"] = agent_name()
+    payload["from_agent"] = sender_agent()
     req = urllib.request.Request(
         peer["url"].rstrip("/") + "/send",
         data=json.dumps(payload).encode(),

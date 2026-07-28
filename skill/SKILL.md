@@ -52,6 +52,12 @@ a2a send <person> -t "..." --agent laptop-ticket99 # address one session of the 
   `--agent` on `reply`/`result` to override. You learn a peer's session names
   from what they send you (echoed back automatically) or out of band; there is
   no cross-machine session discovery.
+- **To receive targeted replies, send and listen under the same `A2A_AGENT`.**
+  Auto-targeting only kicks in when the original sender had `A2A_AGENT` set — an
+  unset sender is stamped blank and its replies broadcast to any of the person's
+  listeners. So if you send from a shell that leaves `A2A_AGENT` at its default
+  and listen under a distinct name, set `A2A_AGENT` to that same listener name on
+  the sending shell, or accept broadcast replies.
 - **If the target session never reappears**, the peer's daemon eventually acts on
   your `--fallback` choice: `broadcast` (default — release to any of their
   sessions and send you a "reassigned" notice), `hold` (keep it pinned for that
