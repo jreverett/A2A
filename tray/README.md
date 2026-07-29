@@ -1,7 +1,7 @@
-# a2a tray icon (Windows)
+# herald tray icon (Windows)
 
 A notification-area icon that shows daemon state at a glance, reading the
-heartbeat and activity markers the daemon writes to `~/.a2a`.
+heartbeat and activity markers the daemon writes to `~/.herald`.
 
 | Icon | State |
 |------|-------|
@@ -19,10 +19,10 @@ matches the current taskbar theme.
 ## Run it
 
 ```powershell
-powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File a2a-tray.ps1
+powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File herald-tray.ps1
 ```
 
-The script auto-detects the WSL `~/.a2a` path via `wslpath`. Right-click the
+The script auto-detects the WSL `~/.herald` path via `wslpath`. Right-click the
 icon for **Show status / Restart daemon / Exit**; double-click shows a status
 balloon.
 
@@ -37,7 +37,7 @@ powershell -ExecutionPolicy Bypass -File setup-tray.ps1 disable   # remove it
 powershell -ExecutionPolicy Bypass -File setup-tray.ps1 status
 ```
 
-`enable` installs a hidden VBScript launcher (`a2a-tray.vbs`) in the Startup
+`enable` installs a hidden VBScript launcher (`herald-tray.vbs`) in the Startup
 folder and starts the tray immediately. The `.vbs`/`wscript` indirection is
 deliberate: a detached `Start-Process`/shortcut to `powershell.exe` launched from
 WSL or a script does not attach to the interactive desktop, so its icon paints to

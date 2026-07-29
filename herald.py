@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""a2a - peer-to-peer agent-to-agent messaging.
+"""herald - peer-to-peer agent-to-agent messaging.
 
 Agent sessions (Claude Code, Codex CLI) on different machines hold threaded
 conversations: messages, task requests with a lifecycle (pending -> working ->
 done/failed), results with attached files, and structured metadata. Each
-machine runs `a2a daemon` (reachable over Tailscale); `a2a wait` blocks until
+machine runs `herald daemon` (reachable over Tailscale); `herald wait` blocks until
 delivery so a session gets woken instead of polling. A person can run many
-agent sessions at once: the first session to `a2a read` an item claims it
-(set A2A_AGENT to name a session; defaults to hostname). See skill/SKILL.md
+agent sessions at once: the first session to `herald read` an item claims it
+(set HERALD_AGENT to name a session; defaults to hostname). See skill/SKILL.md
 for the protocol agents follow.
 
-Config in ~/.a2a/config.json:
+Config in ~/.herald/config.json:
 {
   "me": "alice",
   "listen": {"host": "auto", "port": 8765},   // auto = Tailscale IP only
@@ -41,17 +41,17 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-__version__ = "0.3.4"
+__version__ = "0.4.0"
 
-A2A_DIR = Path(os.environ.get("A2A_DIR", Path.home() / ".a2a"))
-CONFIG_PATH = A2A_DIR / "config.json"
-INBOX_DIR = A2A_DIR / "inbox"
-OUTBOX_DIR = A2A_DIR / "outbox"
-FILES_DIR = A2A_DIR / "files"
-QUEUE_DIR = A2A_DIR / "queue"
-ACTIVITY_DIR = A2A_DIR / "activity"
-SESSIONS_DIR = A2A_DIR / "sessions"
-STATUS_PATH = A2A_DIR / "status.json"
+HERALD_DIR = Path(os.environ.get("HERALD_DIR", Path.home() / ".herald"))
+CONFIG_PATH = HERALD_DIR / "config.json"
+INBOX_DIR = HERALD_DIR / "inbox"
+OUTBOX_DIR = HERALD_DIR / "outbox"
+FILES_DIR = HERALD_DIR / "files"
+QUEUE_DIR = HERALD_DIR / "queue"
+ACTIVITY_DIR = HERALD_DIR / "activity"
+SESSIONS_DIR = HERALD_DIR / "sessions"
+STATUS_PATH = HERALD_DIR / "status.json"
 MAX_FILE_BYTES = 100 * 1024 * 1024
 KINDS = ("message", "task", "result")
 STATUSES = ("accepted", "working", "done", "failed")
@@ -65,7 +65,7 @@ SUSPEND_GAP = HEARTBEAT_INTERVAL * 6   # a maintenance tick later than this mean
 
 def load_config():
     if not CONFIG_PATH.exists():
-        sys.exit(f"No config at {CONFIG_PATH}. Run: a2a init --me NAME")
+        sys.exit(f"No config at {CONFIG_PATH}. Run: herald init --me NAME")
     return json.loads(CONFIG_PATH.read_text())
 
 
@@ -98,15 +98,15 @@ def new_id():
 
 
 def agent_name():
-    return os.environ.get("A2A_AGENT", socket.gethostname())
+    return os.environ.get("HERALD_AGENT", socket.gethostname())
 
 
 def sender_agent():
     """Agent name stamped on outbound items so replies can target this session.
-    Only an explicitly-set A2A_AGENT is used; unset stays blank so replies
+    Only an explicitly-set HERALD_AGENT is used; unset stays blank so replies
     broadcast, never the hostname default (a hostname is a machine, not a
     listening session, so targeting it is guaranteed-undeliverable)."""
-    return os.environ.get("A2A_AGENT", "")
+    return os.environ.get("HERALD_AGENT", "")
 
 
 def is_pid_alive(pid):
@@ -281,7 +281,7 @@ def cmd_daemon(cfg, args):
     Handler.token = cfg["token"]
     Handler.notify_command = cfg.get("notify_command")
     scope = "tailnet-only" if listen.get("host", "auto") == "auto" else "custom bind"
-    print(f"a2a v{__version__} daemon: {cfg['me']} listening on {host}:{port} ({scope}), inbox {INBOX_DIR}",
+    print(f"herald v{__version__} daemon: {cfg['me']} listening on {host}:{port} ({scope}), inbox {INBOX_DIR}",
           flush=True)
     started = time.strftime("%Y-%m-%d %H:%M:%S")
     threading.Thread(target=_maintenance_loop, args=(cfg["me"], f"{host}:{port}", started),
@@ -378,7 +378,7 @@ def _notify_origin(cfg, item, target, text, intent):
     payload = {"kind": "message", "text": text,
                "thread": item.get("thread", ""), "reply_to": item.get("id", ""),
                "to_agent": item.get("from_agent", ""),
-               "meta": {"a2a_intent": intent, "target": target}}
+               "meta": {"herald_intent": intent, "target": target}}
     try:
         deliver(cfg, peer, payload)
     except SystemExit:
@@ -475,7 +475,7 @@ def deliver(cfg, peer_name, payload, queue_on_fail=True):
         depth = enqueue(peer_name, payload)
         reason = getattr(e, "reason", e)
         print(f"Peer '{peer_name}' is unreachable ({reason}) - queued for retry "
-              f"({depth} pending). Delivers on next contact, or run: a2a flush {peer_name}")
+              f"({depth} pending). Delivers on next contact, or run: herald flush {peer_name}")
         return None
 
     _record_outbox(payload, result, peer_name)
@@ -573,18 +573,18 @@ def cmd_result(cfg, args):
 
 def cmd_status(cfg, args):
     if not STATUS_PATH.exists():
-        print("a2a daemon: not running (no status file). Start it with: a2a daemon")
+        print("herald daemon: not running (no status file). Start it with: herald daemon")
         sys.exit(1)
     try:
         s = json.loads(STATUS_PATH.read_text())
     except (OSError, json.JSONDecodeError):
-        sys.exit("a2a daemon: status file unreadable")
+        sys.exit("herald daemon: status file unreadable")
     age = time.time() - s.get("heartbeat", 0)
     if age > HEARTBEAT_INTERVAL * 3:
-        print(f"a2a daemon: STALE - last heartbeat {age:.0f}s ago "
-              f"(pid {s.get('pid')} likely dead). Restart with: a2a daemon")
+        print(f"herald daemon: STALE - last heartbeat {age:.0f}s ago "
+              f"(pid {s.get('pid')} likely dead). Restart with: herald daemon")
         sys.exit(1)
-    print(f"a2a v{s.get('version', '?')} daemon: running - {s.get('me')} on {s.get('listen')} "
+    print(f"herald v{s.get('version', '?')} daemon: running - {s.get('me')} on {s.get('listen')} "
           f"(pid {s.get('pid')}, up since {s.get('started')}, {s.get('queued', 0)} queued)")
 
 
@@ -726,8 +726,8 @@ def cmd_introduce(cfg, args):
     url = f"http://{host}:{listen.get('port', 8765)}"
     payload = {
         "kind": "message",
-        "text": f"{cfg['me']} would like to connect - accept with: a2a accept <item-id>",
-        "meta": {"a2a_intent": "introduce", "name": cfg["me"],
+        "text": f"{cfg['me']} would like to connect - accept with: herald accept <item-id>",
+        "meta": {"herald_intent": "introduce", "name": cfg["me"],
                  "url": url, "token": cfg["token"]},
     }
     result = deliver(cfg, args.peer, payload)
@@ -738,7 +738,7 @@ def cmd_introduce(cfg, args):
 def cmd_accept(cfg, args):
     item = find_inbox_item(args.id)
     meta = item.get("meta", {})
-    if meta.get("a2a_intent") != "introduce":
+    if meta.get("herald_intent") != "introduce":
         sys.exit(f"Item {args.id} is not an introduction")
     name, url, token = meta.get("name"), meta.get("url"), meta.get("token")
     if not (name and url and token):
@@ -751,7 +751,7 @@ def cmd_accept(cfg, args):
     payload = {"kind": "message",
                "text": f"{cfg['me']} accepted your introduction - connected.",
                "thread": item["thread"], "reply_to": item["id"],
-               "meta": {"a2a_intent": "accepted", "name": cfg["me"]}}
+               "meta": {"herald_intent": "accepted", "name": cfg["me"]}}
     deliver(cfg, name, payload)
     print(f"Peer '{name}' added ({url}) and confirmation sent")
 
@@ -765,7 +765,7 @@ def cmd_peer(cfg, args):
         sys.exit("peer add/remove needs a name")
     if args.action == "add":
         if not (args.url and args.token):
-            sys.exit("Usage: a2a peer add NAME URL TOKEN")
+            sys.exit("Usage: herald peer add NAME URL TOKEN")
         cfg.setdefault("peers", {})[args.name] = {"url": args.url, "token": args.token}
     elif args.action == "remove":
         if args.name not in cfg.get("peers", {}):
@@ -776,7 +776,7 @@ def cmd_peer(cfg, args):
 
 
 def cmd_init(cfg_unused, args):
-    A2A_DIR.mkdir(parents=True, exist_ok=True)
+    HERALD_DIR.mkdir(parents=True, exist_ok=True)
     if CONFIG_PATH.exists() and not args.force:
         sys.exit(f"{CONFIG_PATH} already exists (use --force to overwrite)")
     cfg = {
@@ -793,11 +793,11 @@ def cmd_init(cfg_unused, args):
 
 
 def main():
-    p = argparse.ArgumentParser(prog="a2a", description=__doc__.split("\n")[0])
-    p.add_argument("--version", action="version", version=f"a2a {__version__}")
+    p = argparse.ArgumentParser(prog="herald", description=__doc__.split("\n")[0])
+    p.add_argument("--version", action="version", version=f"herald {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    sp = sub.add_parser("init", help="create ~/.a2a/config.json")
+    sp = sub.add_parser("init", help="create ~/.herald/config.json")
     sp.add_argument("--me", required=True)
     sp.add_argument("--port", type=int, default=8765)
     sp.add_argument("--force", action="store_true")
@@ -811,7 +811,7 @@ def main():
     sp.add_argument("--file", "-f", action="append")
     sp.add_argument("--meta", action="append", help="key=value, repeatable")
     sp.add_argument("--thread", help="continue an existing thread")
-    sp.add_argument("--agent", help="address a specific session of the peer (see: a2a sessions)")
+    sp.add_argument("--agent", help="address a specific session of the peer (see: herald sessions)")
     sp.add_argument("--fallback", choices=FALLBACKS, default="broadcast",
                     help="if the target session never appears: broadcast (release to any), "
                          "hold (keep pinned), bounce (return undeliverable to you)")

@@ -1,4 +1,4 @@
-# a2a tray icon — "Two Roofs"
+# herald tray icon — "Two Roofs"
 
 One chevron pair. Each chevron pivots 90 degrees in place to encode daemon state.
 The pair layout (side by side, 4-unit seam) never changes.
@@ -15,10 +15,10 @@ The pair layout (side by side, 4-unit seam) never changes.
 
 | State     | File                  | Chevrons        | Colour                                  |
 |-----------|-----------------------|-----------------|-----------------------------------------|
-| Idle      | a2a-idle.svg          | both point up   | taskbar foreground (white / near-black) |
-| Sending   | a2a-sending.svg       | both point right| #2F6FD0 light bar · #5B96EA dark bar    |
-| Receiving | a2a-receiving.svg     | both point left | #2F7D4F light bar · #5FB383 dark bar    |
-| Down      | a2a-down.svg          | both point down | #8A8376 light bar · #7D838B dark bar    |
+| Idle      | herald-idle.svg          | both point up   | taskbar foreground (white / near-black) |
+| Sending   | herald-sending.svg       | both point right| #2F6FD0 light bar · #5B96EA dark bar    |
+| Receiving | herald-receiving.svg     | both point left | #2F7D4F light bar · #5FB383 dark bar    |
+| Down      | herald-down.svg          | both point down | #8A8376 light bar · #7D838B dark bar    |
 
 Direction is the primary signal; colour is secondary. Flattened to greyscale all
 four states are still distinguishable, so the set is colour-blind safe.
@@ -31,11 +31,11 @@ size, then pack:
 ```sh
 for state in idle sending receiving down; do
   for px in 16 20 24 32 48 256; do
-    rsvg-convert -w $px -h $px "a2a-$state.svg" -o "build/$state-$px.png"
+    rsvg-convert -w $px -h $px "herald-$state.svg" -o "build/$state-$px.png"
   done
   magick build/$state-16.png build/$state-20.png build/$state-24.png \
          build/$state-32.png build/$state-48.png build/$state-256.png \
-         "a2a-$state.ico"
+         "herald-$state.ico"
 done
 ```
 

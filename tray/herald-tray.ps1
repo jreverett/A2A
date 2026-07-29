@@ -1,12 +1,12 @@
-# a2a tray icon - shows daemon state in the Windows notification area.
+# herald tray icon - shows daemon state in the Windows notification area.
 #   green  = running (idle)   blue up-arrow = sending   purple down-arrow = receiving
 #   grey X = daemon down / heartbeat stale
-# Reads ~/.a2a/status.json and ~/.a2a/activity/{send,recv} from WSL over \\wsl$.
-# Run hidden:  powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File a2a-tray.ps1
+# Reads ~/.herald/status.json and ~/.herald/activity/{send,recv} from WSL over \\wsl$.
+# Run hidden:  powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File herald-tray.ps1
 
 param(
-    [string]$A2ADir,                     # Windows path to the WSL ~/.a2a dir; auto-detected if omitted
-    [string]$DaemonCmd = "if systemctl --user cat a2a-daemon.service >/dev/null 2>&1; then systemctl --user restart a2a-daemon; else pkill -f '[a]2a.py daemon' 2>/dev/null; setsid `"`$HOME/.local/bin/a2a`" daemon >/dev/null 2>&1 </dev/null & disown; fi",  # systemd if present, else the PATH wrapper - machine-agnostic
+    [string]$HeraldDir,                     # Windows path to the WSL ~/.herald dir; auto-detected if omitted
+    [string]$DaemonCmd = "if systemctl --user cat herald-daemon.service >/dev/null 2>&1; then systemctl --user restart herald-daemon; else pkill -f '[h]erald.py daemon' 2>/dev/null; setsid `"`$HOME/.local/bin/herald`" daemon >/dev/null 2>&1 </dev/null & disown; fi",  # systemd if present, else the PATH wrapper - machine-agnostic
     [int]$HeartbeatTimeout = 15,         # seconds without a heartbeat => daemon considered down
     [double]$ActiveWindow = 4.0          # seconds an arrow lingers after a send/recv event
 )
@@ -26,31 +26,31 @@ function Get-BarTheme {
     return 'dark'
 }
 
-# Resolve the WSL ~/.a2a directory as a Windows path. At login the tray starts
+# Resolve the WSL ~/.herald directory as a Windows path. At login the tray starts
 # before WSL is warm, so this can return nothing; it is retried lazily in
 # Poll-State rather than resolved only once - otherwise a cold boot would pin
 # the icon to 'offline' forever even after WSL and the daemon come up.
-function Resolve-A2ADir {
+function Resolve-HeraldDir {
     try {
         $prev = [Console]::OutputEncoding
         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-        $d = (& wsl.exe -e bash -lc "wslpath -w ~/.a2a" 2>$null | Select-Object -First 1)
+        $d = (& wsl.exe -e bash -lc "wslpath -w ~/.herald" 2>$null | Select-Object -First 1)
         [Console]::OutputEncoding = $prev
         if ($d) { return $d.Trim() }
     } catch {}
     return $null
 }
 
-function Set-A2APaths($dir) {
-    $script:a2aDir     = $dir
+function Set-HeraldPaths($dir) {
+    $script:heraldDir     = $dir
     $script:statusPath = if ($dir) { Join-Path $dir "status.json" } else { $null }
     $script:sendMarker = if ($dir) { Join-Path $dir "activity\send" } else { $null }
     $script:recvMarker = if ($dir) { Join-Path $dir "activity\recv" } else { $null }
 }
 
 $script:lastResolve = 0
-if (-not $A2ADir) { $A2ADir = Resolve-A2ADir }
-Set-A2APaths $A2ADir
+if (-not $HeraldDir) { $HeraldDir = Resolve-HeraldDir }
+Set-HeraldPaths $HeraldDir
 
 $script:FrameCount = 8
 $script:icons = @{ dark = @{}; light = @{} }
@@ -68,7 +68,7 @@ foreach ($theme in 'dark', 'light') {
 
 $script:ni = New-Object System.Windows.Forms.NotifyIcon
 $script:ni.Icon = $script:icons[(Get-BarTheme)]['offline']
-$script:ni.Text = "a2a: starting..."
+$script:ni.Text = "herald: starting..."
 $script:ni.Visible = $true
 
 function Now-Unix { [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0 }
@@ -86,9 +86,9 @@ $script:state = 'offline'
 # Runs on a throttle (not every animation frame) to keep \\wsl$ reads light.
 function Poll-State {
     $now = Now-Unix
-    if (-not $script:a2aDir -and ($now - $script:lastResolve) -ge 5) {
+    if (-not $script:heraldDir -and ($now - $script:lastResolve) -ge 5) {
         $script:lastResolve = $now
-        Set-A2APaths (Resolve-A2ADir)   # cold-boot self-heal: retry until WSL answers
+        Set-HeraldPaths (Resolve-HeraldDir)   # cold-boot self-heal: retry until WSL answers
     }
     $status = $null
     if ($script:statusPath -and (Test-Path $script:statusPath)) {
@@ -96,7 +96,7 @@ function Poll-State {
     }
     if (-not $status -or ($now - [double]$status.heartbeat) -gt $HeartbeatTimeout) {
         $script:state = 'offline'
-        $script:ni.Text = "a2a: daemon not running"
+        $script:ni.Text = "herald: daemon not running"
         return
     }
     $send = Read-Marker $script:sendMarker
@@ -107,7 +107,7 @@ function Poll-State {
 
     $verb = @{ idle = 'running'; send = 'sending'; recv = 'receiving' }[$script:state]
     $q = if ($status.queued) { " | $($status.queued) queued" } else { "" }
-    $text = "a2a v$($status.version): $verb - $($status.me) on $($status.listen)$q"
+    $text = "herald v$($status.version): $verb - $($status.me) on $($status.listen)$q"
     if ($text.Length -gt 127) { $text = $text.Substring(0, 127) }
     $script:ni.Text = $text
 }
@@ -136,7 +136,7 @@ $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $miStatus = $menu.Items.Add("Show status")
 $miStatus.add_Click({
     $t = $script:ni.Text
-    $script:ni.ShowBalloonTip(3000, "a2a", $t, [System.Windows.Forms.ToolTipIcon]::Info)
+    $script:ni.ShowBalloonTip(3000, "herald", $t, [System.Windows.Forms.ToolTipIcon]::Info)
 })
 
 $miRestart = $menu.Items.Add("Restart daemon")

@@ -15,16 +15,16 @@
   <rect x="45" y="80" width="130" height="30" rx="5" fill="#ffffff" fill-opacity="0.04" stroke="#8b949e"/>
   <rect x="55" y="90" width="130" height="30" rx="5" fill="#ffffff" fill-opacity="0.04" stroke="#8b949e"/>
   <text x="120" y="110" text-anchor="middle" fill="#8b949e">agent session</text>
-  <text x="100" y="145" fill="#5b8def">a2a send / reply</text>
+  <text x="100" y="145" fill="#5b8def">herald send / reply</text>
 
   <rect x="35" y="200" width="215" height="70" rx="8" fill="none" stroke="#5b8def" stroke-width="1.5"/>
-  <text x="142" y="225" text-anchor="middle" fill="#5b8def">a2a daemon + inbox</text>
+  <text x="142" y="225" text-anchor="middle" fill="#5b8def">herald daemon + inbox</text>
   <text x="142" y="245" text-anchor="middle" fill="#8b949e" font-size="11">binds to tailnet IP only -</text>
   <text x="142" y="260" text-anchor="middle" fill="#8b949e" font-size="11">no LAN / internet port</text>
 
   <!-- wake arrow inside Alice's machine -->
   <path d="M 120 200 L 120 125" fill="none" stroke="#5b8def" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
-  <text x="130" y="180" fill="#8b949e" font-size="11">a2a wait wakes</text>
+  <text x="130" y="180" fill="#8b949e" font-size="11">herald wait wakes</text>
   <text x="130" y="194" fill="#8b949e" font-size="11">a session</text>
 
   <!-- Bob's machine -->
@@ -39,13 +39,13 @@
   <text x="595" y="145" fill="#5b8def" text-anchor="middle">first read claims the item</text>
 
   <rect x="530" y="200" width="215" height="70" rx="8" fill="none" stroke="#5b8def" stroke-width="1.5"/>
-  <text x="637" y="225" text-anchor="middle" fill="#5b8def">a2a daemon + inbox</text>
+  <text x="637" y="225" text-anchor="middle" fill="#5b8def">herald daemon + inbox</text>
   <text x="637" y="245" text-anchor="middle" fill="#8b949e" font-size="11">token-checked; strangers</text>
   <text x="637" y="260" text-anchor="middle" fill="#8b949e" font-size="11">rejected</text>
 
   <!-- wake arrow inside Bob's machine -->
   <path d="M 660 200 L 660 125" fill="none" stroke="#5b8def" stroke-dasharray="4 3" marker-end="url(#arrow)"/>
-  <text x="655" y="180" text-anchor="end" fill="#8b949e" font-size="11">a2a wait wakes</text>
+  <text x="655" y="180" text-anchor="end" fill="#8b949e" font-size="11">herald wait wakes</text>
   <text x="655" y="194" text-anchor="end" fill="#8b949e" font-size="11">a session</text>
 
   <!-- Tailscale tunnel -->

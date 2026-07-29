@@ -1,9 +1,9 @@
 #!/bin/bash
-# a2a installer for WSL. One command does everything, including Tailscale:
-#   curl -fsSL https://raw.githubusercontent.com/jreverett/A2A/master/install.sh | bash -s -- --me alice
+# herald installer for WSL. One command does everything, including Tailscale:
+#   curl -fsSL https://raw.githubusercontent.com/jreverett/herald/master/install.sh | bash -s -- --me alice
 # Or from a clone: ./install.sh --me alice
 set -e
-ME=""; PORT=8765; DIR="$HOME/a2a"; SKIP_NETWORK=""; AUTH_KEY=""
+ME=""; PORT=8765; DIR="$HOME/herald"; SKIP_NETWORK=""; AUTH_KEY=""
 PEER_NAME=""; PEER_URL=""; PEER_TOKEN=""
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -30,7 +30,7 @@ banner() {
 }
 
 TTY=""; [ -t 1 ] && TTY=1
-STEP_LOG="${TMPDIR:-/tmp}/a2a-install-step.log"
+STEP_LOG="${TMPDIR:-/tmp}/herald-install-step.log"
 
 # spin "label" cmd...  - animated spinner on a TTY, plain line otherwise
 spin() {
@@ -57,13 +57,13 @@ spin() {
   return "$rc"
 }
 
-banner "a2a setup - agent-to-agent messaging" \
+banner "herald setup - agent-to-agent messaging" \
        "" \
        "This installer will:" \
        "  1. Install Tailscale (private mesh VPN) and join your tailnet" \
-       "  2. Write ~/.a2a/config.json and put 'a2a' on your PATH" \
-       "  3. Teach your agents the a2a protocol (skill / instructions)" \
-       "  4. Start the a2a receiver daemon" \
+       "  2. Write ~/.herald/config.json and put 'herald' on your PATH" \
+       "  3. Teach your agents the herald protocol (skill / instructions)" \
+       "  4. Start the herald receiver daemon" \
        "  5. (On Windows) Add a system-tray status icon" \
        "" \
        "Security - nothing is exposed outside your private network:" \
@@ -75,22 +75,34 @@ banner "a2a setup - agent-to-agent messaging" \
 
 # 0. locate or fetch the repo (supports curl | bash)
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
-if [ -f "$SELF_DIR/a2a.py" ]; then
+if [ -f "$SELF_DIR/herald.py" ]; then
   REPO_DIR="$SELF_DIR"
-elif [ -f "$DIR/a2a.py" ]; then
+elif [ -f "$DIR/herald.py" ]; then
   REPO_DIR="$DIR"
 else
-  spin "Fetching a2a" git clone -q https://github.com/jreverett/A2A.git "$DIR"
+  spin "Fetching herald" git clone -q https://github.com/jreverett/herald.git "$DIR"
   REPO_DIR="$DIR"
 fi
+
+# 0.7 migrate a legacy `a2a` install (pre-rename): copy config aside, retire the old daemon.
+LEGACY_DIR="$HOME/.a2a"; MIGRATED=""
+if [ -d "$LEGACY_DIR" ] && [ ! -d "$HOME/.herald" ]; then
+  cp -a "$LEGACY_DIR" "$HOME/.herald"
+  MIGRATED=1
+  echo "Migrated existing config ~/.a2a -> ~/.herald (token and peers preserved)"
+fi
+if command -v systemctl >/dev/null && systemctl --user cat a2a-daemon.service >/dev/null 2>&1; then
+  systemctl --user disable --now a2a-daemon.service 2>/dev/null || true
+fi
+pkill -f '[a]2a.py daemon' 2>/dev/null || true
 
 # 0.5 network: Tailscale inside WSL (skippable)
 if [ -z "$SKIP_NETWORK" ]; then
   if ! command -v tailscale >/dev/null; then
     banner "PROMPT COMING UP: your sudo password" \
            "" \
-           "Why: installing Tailscale, the private VPN a2a runs over." \
-           "It creates an encrypted device-to-device network; a2a will only" \
+           "Why: installing Tailscale, the private VPN herald runs over." \
+           "It creates an encrypted device-to-device network; herald will only" \
            "ever listen inside it, so no port is opened to your LAN or the" \
            "internet."
     sudo -v
@@ -110,7 +122,7 @@ if [ -z "$SKIP_NETWORK" ]; then
       banner "Joining the shared private network" \
              "" \
              "Using the auth key you were given - no account or sign-up" \
-             "needed. Your machine joins your peer's tailnet so their a2a" \
+             "needed. Your machine joins your peer's tailnet so their herald" \
              "daemon can reach yours; traffic stays inside the encrypted" \
              "mesh."
       sudo -v
@@ -119,7 +131,7 @@ if [ -z "$SKIP_NETWORK" ]; then
       banner "PROMPT COMING UP: Tailscale login link" \
              "" \
              "Why: this authenticates your machine into the shared tailnet so" \
-             "your peer's machine can reach your a2a inbox (and only that -" \
+             "your peer's machine can reach your herald inbox (and only that -" \
              "traffic stays inside the encrypted mesh). Open the printed link" \
              "in your browser and sign in." \
              "" \
@@ -131,16 +143,16 @@ if [ -z "$SKIP_NETWORK" ]; then
 fi
 
 # 1. config + inbox
-if [ -f "$HOME/.a2a/config.json" ]; then
-  echo "~/.a2a/config.json already exists, keeping it"
+if [ -f "$HOME/.herald/config.json" ]; then
+  echo "~/.herald/config.json already exists, keeping it"
 else
-  python3 "$REPO_DIR/a2a.py" init --me "$ME" --port "$PORT"
+  python3 "$REPO_DIR/herald.py" init --me "$ME" --port "$PORT"
 fi
 
-# 2. a2a on PATH
+# 2. herald on PATH
 mkdir -p "$HOME/.local/bin"
-printf '#!/bin/bash\nexec python3 "%s/a2a.py" "$@"\n' "$REPO_DIR" > "$HOME/.local/bin/a2a"
-chmod +x "$HOME/.local/bin/a2a"
+printf '#!/bin/bash\nexec python3 "%s/herald.py" "$@"\n' "$REPO_DIR" > "$HOME/.local/bin/herald"
+chmod +x "$HOME/.local/bin/herald"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *)
   echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
   echo "Added ~/.local/bin to PATH in ~/.bashrc (open a new shell)" ;;
@@ -149,37 +161,37 @@ esac
 # 3. agent skill/instructions
 if [ -d "$HOME/.claude" ]; then
   mkdir -p "$HOME/.claude/skills"
-  ln -sfn "$REPO_DIR/skill" "$HOME/.claude/skills/a2a"
-  echo "Claude Code skill installed (~/.claude/skills/a2a)"
+  ln -sfn "$REPO_DIR/skill" "$HOME/.claude/skills/herald"
+  echo "Claude Code skill installed (~/.claude/skills/herald)"
 fi
 for f in "$HOME/.codex/AGENTS.md" "$HOME/.copilot/copilot-instructions.md"; do
-  if [ -f "$f" ] && ! grep -q "a2a agent protocol pointer" "$f"; then
-    printf '\n# a2a agent protocol pointer\nFor messaging other people'"'"'s agents (a2a), follow %s/skill/SKILL.md\n' "$REPO_DIR" >> "$f"
-    echo "Added a2a pointer to $f"
+  if [ -f "$f" ] && ! grep -q "herald agent protocol pointer" "$f"; then
+    printf '\n# herald agent protocol pointer\nFor messaging other people'"'"'s agents (herald), follow %s/skill/SKILL.md\n' "$REPO_DIR" >> "$f"
+    echo "Added herald pointer to $f"
   fi
 done
 
 # 4. daemon as a systemd user service (falls back to instructions if no systemd)
 if command -v systemctl >/dev/null && systemctl --user show-environment >/dev/null 2>&1; then
   mkdir -p "$HOME/.config/systemd/user"
-  cat > "$HOME/.config/systemd/user/a2a-daemon.service" <<EOF
+  cat > "$HOME/.config/systemd/user/herald-daemon.service" <<EOF
 [Unit]
-Description=a2a receiver daemon
+Description=herald receiver daemon
 [Service]
-ExecStart=/usr/bin/python3 $REPO_DIR/a2a.py daemon
+ExecStart=/usr/bin/python3 $REPO_DIR/herald.py daemon
 Restart=on-failure
 [Install]
 WantedBy=default.target
 EOF
   systemctl --user daemon-reload
-  if systemctl --user enable --now a2a-daemon.service 2>/dev/null; then
-    echo "Daemon running (systemd user service a2a-daemon)"
+  if systemctl --user enable --now herald-daemon.service 2>/dev/null; then
+    echo "Daemon running (systemd user service herald-daemon)"
   else
     echo "Could not start the systemd service; start the daemon manually:"
-    echo "  nohup a2a daemon >~/.a2a/daemon.log 2>&1 &"
+    echo "  nohup herald daemon >~/.herald/daemon.log 2>&1 &"
   fi
 else
-  echo "No systemd; start the daemon manually: nohup a2a daemon >~/.a2a/daemon.log 2>&1 &"
+  echo "No systemd; start the daemon manually: nohup herald daemon >~/.herald/daemon.log 2>&1 &"
 fi
 
 # 4.5 Windows tray indicator (only on WSL-with-Windows; skipped cleanly elsewhere)
@@ -192,15 +204,15 @@ if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && command -v powershell.
   fi
 fi
 
-# 5. connect to a peer and introduce myself (their side runs `a2a accept`)
+# 5. connect to a peer and introduce myself (their side runs `herald accept`)
 if [ -n "$PEER_NAME" ]; then
   if [ -n "$PEER_URL" ] && [ -n "$PEER_TOKEN" ]; then
-    python3 "$REPO_DIR/a2a.py" peer add "$PEER_NAME" "$PEER_URL" "$PEER_TOKEN"
-    if spin "Connecting to $PEER_NAME" python3 "$REPO_DIR/a2a.py" introduce "$PEER_NAME"; then
+    python3 "$REPO_DIR/herald.py" peer add "$PEER_NAME" "$PEER_URL" "$PEER_TOKEN"
+    if spin "Connecting to $PEER_NAME" python3 "$REPO_DIR/herald.py" introduce "$PEER_NAME"; then
       banner "Introduced yourself to $PEER_NAME" \
              "" \
              "  you ---------------> $PEER_NAME     delivered" \
-             "  you <--------------- $PEER_NAME     once they run: a2a accept" \
+             "  you <--------------- $PEER_NAME     once they run: herald accept" \
              "" \
              "Their agent will accept and confirm; then you're connected" \
              "both ways."
@@ -210,10 +222,24 @@ if [ -n "$PEER_NAME" ]; then
   fi
 fi
 
-TOKEN=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.a2a/config.json')))['token'])")
+# 4.7 retire legacy `a2a` artefacts, but only once the new daemon is confirmed up (reversible until then).
+if "$HOME/.local/bin/herald" status >/dev/null 2>&1; then
+  rm -f "$HOME/.local/bin/a2a"
+  [ -L "$HOME/.claude/skills/a2a" ] && rm -f "$HOME/.claude/skills/a2a"
+  if [ -f "$HOME/.config/systemd/user/a2a-daemon.service" ]; then
+    rm -f "$HOME/.config/systemd/user/a2a-daemon.service"
+    command -v systemctl >/dev/null && systemctl --user daemon-reload 2>/dev/null || true
+  fi
+  if [ -n "$MIGRATED" ]; then
+    rm -rf "$LEGACY_DIR"
+    echo "Removed legacy ~/.a2a after verifying herald is up"
+  fi
+fi
+
+TOKEN=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.herald/config.json')))['token'])")
 IP=$(tailscale ip -4 2>/dev/null | head -1 || true)
 echo
 echo "Done. Your details, should a peer need to add you manually:"
 echo "  address: http://${IP:-<your-tailnet-ip>}:$PORT"
 echo "  token:   $TOKEN"
-echo "Connect to someone: a2a peer add <name> <their-address> <their-token> && a2a introduce <name>"
+echo "Connect to someone: herald peer add <name> <their-address> <their-token> && herald introduce <name>"
