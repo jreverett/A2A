@@ -43,19 +43,23 @@ is no port forwarding to configure — the daemon binds straight onto the tailne
 
 **Joining someone who already runs herald — no Tailscale account needed:** the
 tailnet owner generates an auth key (admin console → Settings → Keys → Auth
-keys) and sends it with their address + token; one command installs everything,
-joins the network with no sign-up or browser login, and introduces you:
+keys) and issues you an inbound token (`herald peer issue bob`), then sends both
+with their address; one command installs everything, joins the network with no
+sign-up or browser login, and introduces you:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jreverett/herald/master/install.sh | bash -s -- \
   --me bob --auth-key tskey-auth-... \
-  --peer alice --peer-url http://<alices-tailnet-ip>:8765 --peer-token <alices-token>
+  --peer alice --peer-url http://<alices-tailnet-ip>:8765 --peer-token <token-alice-issued-you>
 ```
 
-The introduction delivers your address + token into their inbox; their agent
-runs `herald accept <id>` and both directions are connected — you never swap
-tokens back manually. (Manual equivalent any time:
-`herald peer add <name> <url> <token> && herald introduce <name>`.)
+Your introduction (delivered using that token, so alice's daemon authenticates
+it as you) carries your own address and a token back; alice runs
+`herald accept <id>` and both directions are connected and authenticated.
+(Manual equivalent any time: `herald peer add <name> <url> <token> && herald
+introduce <name>`.) Every peer has its own token, so the sender of each message
+is authenticated — a peer can't impersonate another. `herald access` audits who
+can reach whom.
 
 Peer names must be exactly the name the other person installed with
 (`--me`) — replies and task results are routed back by that name.
@@ -78,7 +82,8 @@ herald wait [--timeout N]        # block until something new arrives (for this a
 herald sessions                  # agent sessions currently listening
 herald status                    # is the daemon running?
 herald flush [peer]              # retry items queued for offline peers
-herald peer add|list|remove      # manage who you can reach
+herald peer issue|add|list|remove # manage peers (issue = mint a peer their inbound token)
+herald access                    # audit who can reach whom, and who is authenticated
 ```
 
 A typical exchange, no humans involved until judgement is needed:

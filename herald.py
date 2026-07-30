@@ -14,11 +14,16 @@ Config in ~/.herald/config.json:
 {
   "me": "alice",
   "listen": {"host": "auto", "port": 8765},   // auto = Tailscale IP only
-  "token": "secret-others-need-to-send-to-me",
   "peers": {
-    "bob": {"url": "http://100.x.y.z:8765", "token": "bobs-secret"}
+    "bob": {
+      "url": "http://100.x.y.z:8765",       // how I reach bob
+      "token": "<token bob issued me>",      // I present this to reach bob
+      "issued_token": "<token I issued bob>" // bob presents this to reach me; it authenticates bob
+    }
   }
 }
+Each peer has its own inbound token, so the sender of every item is authenticated
+(the payload's claimed identity is ignored).
 
 Stdlib only. Received tasks are never auto-executed by this tool; the
 receiving agent triages them (see AGENTS.md).
@@ -41,7 +46,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 HERALD_DIR = Path(os.environ.get("HERALD_DIR", Path.home() / ".herald"))
 CONFIG_PATH = HERALD_DIR / "config.json"
@@ -174,9 +179,9 @@ def sanitize_filename(name):
 # ---------------- daemon (receiver) ----------------
 
 class Handler(BaseHTTPRequestHandler):
-    token = None
     notify_command = None
     me = None
+    peer_by_token = {}   # per-peer inbound token -> peer name, for authenticated identity
 
     def _json(self, code, obj):
         body = json.dumps(obj).encode()
@@ -196,7 +201,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != "/send":
             self._json(404, {"error": "not found"})
             return
-        if self.headers.get("Authorization", "") != f"Bearer {self.token}":
+        auth = self.headers.get("Authorization", "")
+        tok = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+        sender = self.peer_by_token.get(tok)   # each peer has its own inbound token; the token is the identity
+        if sender is None:
             self._json(401, {"error": "bad token"})
             return
         length = int(self.headers.get("Content-Length", 0))
@@ -217,7 +225,8 @@ class Handler(BaseHTTPRequestHandler):
             "id": item_id,
             "thread": str(item.get("thread") or item_id)[:64],
             "reply_to": str(item.get("reply_to", ""))[:64],
-            "from": str(item.get("from", "unknown"))[:64],
+            "from": sender,   # authoritative: the token proves who sent it, not the payload
+
             "from_agent": str(item.get("from_agent", ""))[:64],
             "to_agent": str(item.get("to_agent", ""))[:64],
             "fallback": item["fallback"] if item.get("fallback") in FALLBACKS else "broadcast",
@@ -279,9 +288,10 @@ def cmd_daemon(cfg, args):
     listen = cfg.get("listen", {})
     host = resolve_listen_host(listen.get("host", "auto"))
     port = listen.get("port", 8765)
-    Handler.token = cfg["token"]
     Handler.notify_command = cfg.get("notify_command")
     Handler.me = cfg["me"]
+    Handler.peer_by_token = {p["issued_token"]: name
+                             for name, p in cfg.get("peers", {}).items() if p.get("issued_token")}
     scope = "tailnet-only" if listen.get("host", "auto") == "auto" else "custom bind"
     print(f"herald v{__version__} daemon: {cfg['me']} listening on {host}:{port} ({scope}), inbox {INBOX_DIR}",
           flush=True)
@@ -311,6 +321,10 @@ def _maintenance_loop(me, listen, started):
             cfg = load_config()
         except (SystemExit, OSError, json.JSONDecodeError):
             cfg = None
+        if cfg:
+            # pick up newly issued/removed peer tokens without needing a restart
+            Handler.peer_by_token = {p["issued_token"]: name
+                                     for name, p in cfg.get("peers", {}).items() if p.get("issued_token")}
         if cfg and tick % retry_every == 0 and any(QUEUE_DIR.glob("*/*.json")):
             for peer_name in cfg.get("peers", {}):
                 try:
@@ -817,17 +831,38 @@ def cmd_sessions(cfg, args):
               f"heartbeat {age:.0f}s ago  waiting on {s.get('waiting_on', '?')}")
 
 
+def cmd_access(cfg, args):
+    """Read-only audit of who can reach whom, and who is authenticated."""
+    peers = cfg.get("peers", {})
+    if not peers:
+        print("No peers.")
+        return
+    print(f"{'PEER':<16}{'I CAN REACH':<13}{'THEY REACH ME':<16}URL")
+    for name, p in sorted(peers.items()):
+        out = "yes" if p.get("token") else "not yet"
+        inb = "authenticated" if p.get("issued_token") else "no token issued"
+        print(f"{name:<16}{out:<13}{inb:<16}{p.get('url', '-')}")
+
+
 def cmd_introduce(cfg, args):
+    if args.peer not in cfg.get("peers", {}):
+        sys.exit(f"Unknown peer '{args.peer}'. Add them first: herald peer add {args.peer} <url> <token>")
     listen = cfg.get("listen", {})
     host = resolve_listen_host(listen.get("host", "auto"))
     url = f"http://{host}:{listen.get('port', 8765)}"
+    # issue this peer their own inbound token so we can authenticate them by it
+    issued = cfg["peers"][args.peer].get("issued_token") or secrets.token_urlsafe(24)
+    cfg["peers"][args.peer]["issued_token"] = issued
+    CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
     payload = {
         "kind": "message",
         "text": f"{cfg['me']} would like to connect - accept with: herald accept <item-id>",
         "meta": {"herald_intent": "introduce", "name": cfg["me"],
-                 "url": url, "token": cfg["token"]},
+                 "url": url, "token": issued},
     }
     result = deliver(cfg, args.peer, payload)
+    if result is None:
+        return   # queued while the peer is offline; deliver already reported it
     print(f"Introduction sent to {args.peer} (id {result['id']}); "
           f"once accepted they can message you back")
 
@@ -840,7 +875,9 @@ def cmd_accept(cfg, args):
     name, url, token = meta.get("name"), meta.get("url"), meta.get("token")
     if not (name and url and token):
         sys.exit("Introduction is missing name/url/token")
-    cfg.setdefault("peers", {})[name] = {"url": url, "token": token}
+    peer = cfg.setdefault("peers", {}).setdefault(name, {})   # keep any token we already issued them
+    peer["url"] = url
+    peer["token"] = token
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
     item["claimed_by"] = agent_name()
     item["claimed_at"] = time.time()
@@ -856,14 +893,26 @@ def cmd_accept(cfg, args):
 def cmd_peer(cfg, args):
     if args.action == "list":
         for name, peer in cfg.get("peers", {}).items():
-            print(f"{name}  {peer['url']}")
+            print(f"{name}  {peer.get('url', '-')}")
         return
     if not args.name:
-        sys.exit("peer add/remove needs a name")
+        sys.exit("peer add/remove/issue needs a name")
+    if args.action == "issue":
+        listen = cfg.get("listen", {})
+        url = f"http://{resolve_listen_host(listen.get('host', 'auto'))}:{listen.get('port', 8765)}"
+        issued = secrets.token_urlsafe(24)
+        cfg.setdefault("peers", {}).setdefault(args.name, {})["issued_token"] = issued
+        CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
+        print(f"Issued an inbound token for '{args.name}'. Send them these two commands:")
+        print(f"  herald peer add {cfg['me']} {url} {issued}")
+        print(f"  herald introduce {cfg['me']}")
+        return
     if args.action == "add":
         if not (args.url and args.token):
             sys.exit("Usage: herald peer add NAME URL TOKEN")
-        cfg.setdefault("peers", {})[args.name] = {"url": args.url, "token": args.token}
+        peer = cfg.setdefault("peers", {}).setdefault(args.name, {})
+        peer["url"] = args.url
+        peer["token"] = args.token
     elif args.action == "remove":
         if args.name not in cfg.get("peers", {}):
             sys.exit(f"No peer '{args.name}'")
@@ -879,14 +928,12 @@ def cmd_init(cfg_unused, args):
     cfg = {
         "me": args.me,
         "listen": {"host": "auto", "port": args.port},
-        "token": secrets.token_urlsafe(24),
         "peers": {},
     }
     CONFIG_PATH.write_text(json.dumps(cfg, indent=2))
     ensure_dirs()
     print(f"Wrote {CONFIG_PATH}")
-    print(f"Your inbox token (give this to peers): {cfg['token']}")
-    print('Add peers under "peers", e.g. {"bob": {"url": "http://100.x.y.z:8765", "token": "..."}}')
+    print("To connect a peer, issue them a token: herald peer issue <name>")
 
 
 def main():
@@ -947,10 +994,12 @@ def main():
     sp.add_argument("id")
 
     sp = sub.add_parser("peer", help="manage peers")
-    sp.add_argument("action", choices=["add", "list", "remove"])
+    sp.add_argument("action", choices=["add", "list", "remove", "issue"])
     sp.add_argument("name", nargs="?")
     sp.add_argument("url", nargs="?")
     sp.add_argument("token", nargs="?")
+
+    sub.add_parser("access", help="audit who can reach whom and who is authenticated")
 
     sp = sub.add_parser("thread", help="show a whole conversation, both directions")
     sp.add_argument("id")
@@ -987,7 +1036,7 @@ def main():
     {"init": cmd_init, "daemon": cmd_daemon, "send": cmd_send, "reply": cmd_reply,
      "result": cmd_result, "inbox": cmd_inbox, "read": cmd_read, "peer": cmd_peer,
      "introduce": cmd_introduce, "accept": cmd_accept, "ask": cmd_ask, "ping": cmd_ping,
-     "thread": cmd_thread, "wait": cmd_wait, "flush": cmd_flush,
+     "access": cmd_access, "thread": cmd_thread, "wait": cmd_wait, "flush": cmd_flush,
      "status": cmd_status, "sessions": cmd_sessions}[args.cmd](cfg, args)
 
 

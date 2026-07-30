@@ -2,6 +2,23 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `herald --version` prints the running version.
 
+## 0.6.0
+
+- Access control, part one: authenticated peer identity. Every peer now gets
+  its own inbound token instead of one shared secret, so the daemon knows which
+  peer sent each item and stamps `from` from the token - the payload's claimed
+  identity is ignored and a peer can no longer impersonate another. The single
+  shared inbox token is gone.
+- `herald peer issue <name>` mints a peer their own inbound token and prints the
+  two commands they run to connect. `introduce` mints a per-peer token too, so a
+  completed introduce/accept leaves both directions authenticated. The daemon
+  picks up newly issued tokens live (no restart).
+- `herald access` audits who you can reach, who can reach you, and who is
+  authenticated.
+- Breaking: no migration from the shared-token config - re-run `install.sh` and
+  reconnect peers. (Per-peer scoping - restricting a peer to part of the
+  filesystem - and the spawn-on-delivery dispatcher build on this and come next.)
+
 ## 0.5.1
 
 - Installer fixes from Simon's migration feedback. The skill is now relinked into

@@ -82,15 +82,15 @@ class PureFunctions(unittest.TestCase):
 class Protocol(unittest.TestCase):
     """Two loopback daemons (alice + bob) driven through the CLI."""
 
-    TOKEN = "DEMO"
-
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="herald-test-")
         self.homes = {"alice": os.path.join(self.root, "alice"),
                       "bob": os.path.join(self.root, "bob")}
         self.ports = {"alice": free_port(), "bob": free_port()}
-        self._write_config("alice", "bob")
-        self._write_config("bob", "alice")
+        # per-peer inbound tokens: TA is what bob presents to reach alice; TB what alice presents to reach bob
+        self.TA, self.TB = "tok-alice-issues-bob", "tok-bob-issues-alice"
+        self._write_config("alice", "bob", issued=self.TA, token=self.TB)
+        self._write_config("bob", "alice", issued=self.TB, token=self.TA)
         self.daemons = {}
         self.start_daemon("alice")
         self.start_daemon("bob")
@@ -110,13 +110,12 @@ class Protocol(unittest.TestCase):
 
     # ---- harness helpers ----
 
-    def _write_config(self, me, peer):
+    def _write_config(self, me, peer, issued, token):
         os.makedirs(self.homes[me], exist_ok=True)
         cfg = {"me": me,
                "listen": {"host": "127.0.0.1", "port": self.ports[me]},
-               "token": self.TOKEN,
                "peers": {peer: {"url": f"http://127.0.0.1:{self.ports[peer]}",
-                                "token": self.TOKEN}}}
+                                "token": token, "issued_token": issued}}}
         with open(os.path.join(self.homes[me], "config.json"), "w") as f:
             json.dump(cfg, f)
 
@@ -196,10 +195,21 @@ class Protocol(unittest.TestCase):
         req = urllib.request.Request(
             f"http://127.0.0.1:{self.ports['bob']}/send",
             data=json.dumps({"kind": "nonsense", "text": "x"}).encode(),
-            headers={"Authorization": f"Bearer {self.TOKEN}", "Content-Type": "application/json"})
+            headers={"Authorization": f"Bearer {self.TB}", "Content-Type": "application/json"})
         with self.assertRaises(urllib.error.HTTPError) as cm:
             urllib.request.urlopen(req)
         self.assertEqual(cm.exception.code, 400)
+
+    def test_from_is_authenticated_not_spoofable(self):
+        # POST to bob using alice's token but a forged 'from'; the stored sender must be 'alice'
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.ports['bob']}/send",
+            data=json.dumps({"kind": "message", "text": "spoof attempt", "from": "mallory"}).encode(),
+            headers={"Authorization": f"Bearer {self.TB}", "Content-Type": "application/json"})
+        urllib.request.urlopen(req)
+        item = self.wait_for_inbox("bob", lambda i: i["text"] == "spoof attempt")
+        self.assertIsNotNone(item)
+        self.assertEqual(item["from"], "alice")   # authenticated by token, not the forged 'mallory'
 
     def test_send_lands_in_peer_inbox(self):
         r = self.cli("alice", "send", "bob", "-m", "hello bob")

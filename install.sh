@@ -251,10 +251,9 @@ if "$HOME/.local/bin/herald" status >/dev/null 2>&1; then
   fi
 fi
 
-TOKEN=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.herald/config.json')))['token'])")
 IP=$(tailscale ip -4 2>/dev/null | head -1 || true)
 echo
-echo "Done. Your details, should a peer need to add you manually:"
-echo "  address: http://${IP:-<your-tailnet-ip>}:$PORT"
-echo "  token:   $TOKEN"
-echo "Connect to someone: herald peer add <name> <their-address> <their-token> && herald introduce <name>"
+echo "Done. Your address: http://${IP:-<your-tailnet-ip>}:$PORT"
+echo "To let someone reach you:  herald peer issue <name>  (send them the two commands it prints)"
+echo "To reach someone who issued you a token:"
+echo "  herald peer add <name> <their-address> <token> && herald introduce <name>"

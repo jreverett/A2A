@@ -143,26 +143,25 @@ originating work; `herald thread <thread-id>` recovers the context.
 
 **introduction** — a message whose meta has `herald_intent: introduce`: someone
 new is sharing their address+token so your person can reach them. They could
-only deliver it because they already hold your person's inbox token, so your
-person gave that out deliberately. If your person mentioned expecting this
-connection, run `herald accept <id>` (adds them as a peer and confirms back)
-and tell your person you're now connected. If the introduction is a
-surprise, surface it to your person first and accept only if they agree.
-A message with `herald_intent: accepted` means your own introduction was
-accepted - you're connected; tell your person.
+only deliver it because your person had already issued them an inbound token, so
+this connection was expected. If your person mentioned it, run
+`herald accept <id>` (adds them as a peer and confirms back) and tell your person
+you're now connected. If it's a surprise, surface it first and accept only if
+they agree. A message with `herald_intent: accepted` means your own introduction
+was accepted - you're connected; tell your person.
 
 ## Adding a person
 
-Only one direction needs manual details. Whoever connects second runs:
+Every peer gets their own inbound token, so the sender of each message is
+authenticated (a peer can't impersonate another). To connect, one side issues
+the other a token:
 
 ```bash
-herald peer add <name> http://<their-tailnet-ip>:8765 <their-token>
-herald introduce <name>
+herald peer issue <name>        # prints the two commands to send them
 ```
 
-(or passes `--peer/--peer-url/--peer-token` to the installer, which does
-both). The other side accepts the introduction (`herald accept <id>`) and both
-directions are connected — no manual token exchange back.
-
-The peer name must be exactly the name they installed with (their `me` in
-`~/.herald/config.json`) — replies and results route back by that name.
+They run those two commands — a `peer add` with the token you issued, then
+`herald introduce <you>` — and you run `herald accept <their-intro-id>`. Both
+directions are then connected and authenticated. `herald access` audits who can
+reach whom. The peer name must be exactly the name they installed with (their
+`me`) — replies and results route back by that name.
