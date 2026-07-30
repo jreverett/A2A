@@ -2,6 +2,24 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `herald --version` prints the running version.
 
+## 0.5.0
+
+- Streamlining to cut latency and token cost, which are dominated by the number
+  of LLM round-trips per exchange (see docs/performance.md).
+- `herald ask <peer>` sends and blocks for the reply in a single command, so a
+  synchronous request/reply is one turn instead of `send` + `wait` + `read`.
+  Reachable peers only; an offline peer falls back to the async queue.
+- `herald wait --read` prints and claims each item on wake, folding the `read`
+  into the same turn.
+- `herald ping <peer>` reports whether a peer's daemon is up and its version,
+  answered by the daemon itself with no agent woken. The `/ping` endpoint now
+  returns version and name.
+- Skill guidance: work in as few turns as possible, don't re-verify setup before
+  every action, and send a single result for quick tasks.
+- Deferred: remote action-handler dispatch (running registered scripts in
+  response to a peer's task) is held until the access-control identity and
+  sandbox land - it must not ship before its security foundation.
+
 ## 0.4.0
 
 - Renamed the project from `a2a` to `herald`. The former name collided with the

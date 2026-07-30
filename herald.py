@@ -41,7 +41,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 HERALD_DIR = Path(os.environ.get("HERALD_DIR", Path.home() / ".herald"))
 CONFIG_PATH = HERALD_DIR / "config.json"
@@ -176,6 +176,7 @@ def sanitize_filename(name):
 class Handler(BaseHTTPRequestHandler):
     token = None
     notify_command = None
+    me = None
 
     def _json(self, code, obj):
         body = json.dumps(obj).encode()
@@ -187,7 +188,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/ping":
-            self._json(200, {"ok": True})
+            self._json(200, {"ok": True, "version": __version__, "me": self.me})
         else:
             self._json(404, {"error": "not found"})
 
@@ -280,6 +281,7 @@ def cmd_daemon(cfg, args):
     port = listen.get("port", 8765)
     Handler.token = cfg["token"]
     Handler.notify_command = cfg.get("notify_command")
+    Handler.me = cfg["me"]
     scope = "tailnet-only" if listen.get("host", "auto") == "auto" else "custom bind"
     print(f"herald v{__version__} daemon: {cfg['me']} listening on {host}:{port} ({scope}), inbox {INBOX_DIR}",
           flush=True)
@@ -675,6 +677,23 @@ def cmd_thread(cfg, args):
         print(f"{ts} {arrow} {summarise(i, direction)}")
 
 
+def _show_and_claim(item, me, out_dir=None):
+    """Print an item's full content (writing its files out) and claim it for
+    this agent. Used by `read`, and by `wait --read` / `ask` to fold the read
+    into the same turn."""
+    path = INBOX_DIR / f"{item['id']}.json"
+    shown = {k: v for k, v in item.items() if k != "files"}
+    shown["files"] = [f["filename"] for f in item["files"]]
+    print(json.dumps(shown, indent=2))
+    for f in item["files"]:
+        out = Path(out_dir or ".") / f["filename"]
+        out.write_bytes(Path(f["stored_path"]).read_bytes())
+        print(f"File written to {out.resolve()}")
+    item["claimed_by"] = me
+    item["claimed_at"] = time.time()
+    path.write_text(json.dumps(item, indent=2))
+
+
 def cmd_wait(cfg, args):
     ensure_dirs()
     me = agent_name()
@@ -694,9 +713,12 @@ def cmd_wait(cfg, args):
             mine.append(item)
         if mine:
             for item in mine:
-                status = f" [{item['status']}]" if item.get("status") else ""
-                print(f"NEW {item['kind']}{status} from {item['from']}: "
-                      f"id {item['id']}, thread {item['thread']}")
+                if args.read:
+                    _show_and_claim(item, me, args.out)   # fold the read into this turn
+                else:
+                    status = f" [{item['status']}]" if item.get("status") else ""
+                    print(f"NEW {item['kind']}{status} from {item['from']}: "
+                          f"id {item['id']}, thread {item['thread']}")
             clear_session()
             return
         if deadline and time.time() > deadline:
@@ -704,6 +726,81 @@ def cmd_wait(cfg, args):
             clear_session()
             sys.exit(2)
         time.sleep(1)
+
+
+def cmd_ask(cfg, args):
+    """Send a task/message and block for the reply, returning it in one command
+    - so a synchronous request/reply is a single turn, not send + wait + read.
+    Only for reachable peers; an offline peer falls back to the async queue."""
+    if args.task and args.message:
+        sys.exit("Use --task or --message, not both")
+    if not (args.task or args.message):
+        sys.exit("Nothing to ask: use --task or --message")
+    ensure_dirs()
+    me = agent_name()
+    payload = {
+        "kind": "task" if args.task else "message",
+        "text": args.task or args.message,
+        "meta": parse_meta(args.meta),
+    }
+    if args.task:
+        payload["status"] = "pending"
+    if args.agent:
+        payload["to_agent"] = args.agent
+        payload["fallback"] = args.fallback
+    attach_files(payload, args.file)
+    known = {p.name for p in INBOX_DIR.glob("*.json")}
+    result = deliver(cfg, args.peer, payload)
+    if result is None:
+        print("Peer is offline - queued; can't wait synchronously. Use `herald wait` for the reply.")
+        return
+    thread = result["thread"]
+    print(f"Sent {payload['kind']} to {args.peer} (thread {thread}); waiting for reply...")
+    started = time.strftime("%Y-%m-%d %H:%M:%S")
+    atexit.register(clear_session)
+    signal.signal(signal.SIGTERM, lambda *a: (clear_session(), sys.exit(0)))
+    deadline = time.time() + (args.timeout or 300)
+    while time.time() < deadline:
+        write_session(started)
+        for name in sorted({p.name for p in INBOX_DIR.glob("*.json")} - known):
+            known.add(name)
+            item = json.loads((INBOX_DIR / name).read_text())
+            if item.get("thread") != thread:
+                continue
+            target = item.get("to_agent", "")
+            if target and target != me:
+                continue
+            if item["kind"] == "result" and item.get("status") in ("accepted", "working"):
+                print(f"[{item['status']}] {item['from']}: {item['text'][:200]}")
+                continue   # progress; keep waiting for the terminal reply
+            _show_and_claim(item, me, args.out)
+            clear_session()
+            return
+        time.sleep(1)
+    clear_session()
+    print(f"No reply from {args.peer} within {args.timeout or 300}s (still open in thread {thread}).")
+    sys.exit(2)
+
+
+def cmd_ping(cfg, args):
+    """Ask a peer's daemon if it's up and what version it runs - answered by the
+    daemon itself, no agent woken. Cheap liveness/version check."""
+    peers = [args.peer] if args.peer else list(cfg.get("peers", {}))
+    if not peers:
+        sys.exit("No peers to ping.")
+    rc = 0
+    for name in peers:
+        peer = cfg.get("peers", {}).get(name)
+        if not peer:
+            sys.exit(f"Unknown peer '{name}'. Known: {', '.join(cfg.get('peers', {}))}")
+        try:
+            with urllib.request.urlopen(peer["url"].rstrip("/") + "/ping", timeout=5) as resp:
+                d = json.loads(resp.read())
+            print(f"{name}: up - {d.get('me', '?')} herald v{d.get('version', '?')}")
+        except (urllib.error.URLError, OSError) as e:
+            print(f"{name}: unreachable ({getattr(e, 'reason', e)})")
+            rc = 1
+    sys.exit(rc)
 
 
 def cmd_sessions(cfg, args):
@@ -860,6 +957,23 @@ def main():
 
     sp = sub.add_parser("wait", help="block until a new item arrives")
     sp.add_argument("--timeout", type=int, default=0)
+    sp.add_argument("--read", action="store_true",
+                    help="show and claim each new item on wake (folds in the read)")
+    sp.add_argument("--out", help="directory for attached files (with --read)")
+
+    sp = sub.add_parser("ask", help="send and block for the reply in one turn (reachable peers only)")
+    sp.add_argument("peer")
+    sp.add_argument("--message", "-m")
+    sp.add_argument("--task", "-t", help="a task request (text is the request)")
+    sp.add_argument("--file", "-f", action="append")
+    sp.add_argument("--meta", action="append", help="key=value, repeatable")
+    sp.add_argument("--agent", help="address a specific session of the peer")
+    sp.add_argument("--fallback", choices=FALLBACKS, default="broadcast")
+    sp.add_argument("--timeout", type=int, default=300, help="seconds to wait for the reply")
+    sp.add_argument("--out", help="directory for attached files in the reply")
+
+    sp = sub.add_parser("ping", help="check a peer's daemon is up and its version (no agent woken)")
+    sp.add_argument("peer", nargs="?", help="a single peer (default: all)")
 
     sp = sub.add_parser("flush", help="retry items queued for unreachable peers")
     sp.add_argument("peer", nargs="?", help="a single peer (default: all)")
@@ -872,7 +986,7 @@ def main():
     cfg = None if args.cmd == "init" else load_config()
     {"init": cmd_init, "daemon": cmd_daemon, "send": cmd_send, "reply": cmd_reply,
      "result": cmd_result, "inbox": cmd_inbox, "read": cmd_read, "peer": cmd_peer,
-     "introduce": cmd_introduce, "accept": cmd_accept,
+     "introduce": cmd_introduce, "accept": cmd_accept, "ask": cmd_ask, "ping": cmd_ping,
      "thread": cmd_thread, "wait": cmd_wait, "flush": cmd_flush,
      "status": cmd_status, "sessions": cmd_sessions}[args.cmd](cfg, args)
 

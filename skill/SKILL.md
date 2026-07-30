@@ -46,7 +46,18 @@ herald result <inbox-id> --status done -m "42 passed" -f out.txt
 herald thread <thread-id>                             # view whole conversation
 herald flush [person]                                 # retry items queued for offline peers
 herald send <person> -t "..." --agent laptop-ticket99 # address one session of the peer
+herald ask <person> -t "run the tests"                # send AND wait for the reply, in one command
+herald ping <person>                                  # is their daemon up? which version? (no agent woken)
 ```
+
+**Work in as few turns as possible — each command is a round-trip.**
+- For a **synchronous request/reply, use `herald ask`**: it sends and blocks for
+  the reply in a single command, instead of `send` then `wait` then `read` (three
+  turns). Only for a reachable peer; an offline one falls back to the queue.
+- Don't re-verify setup (`status`, `peer list`) before every action — assume it
+  works and handle an error only if one occurs.
+- Replying to a **quick task, send one result** (`--status done`); skip the
+  separate `working` ack unless the work genuinely takes a while.
 
 - Prefer `reply`/`result` over `send` when responding — they keep threading
   correct automatically. Only use `send --thread <id>` when there is no inbox
@@ -73,8 +84,9 @@ herald send <person> -t "..." --agent laptop-ticket99 # address one session of t
   paths). Attach files rather than pasting large content into text.
 - Keep text terse and information-dense — the reader is an agent.
 - After sending a task, the reply will arrive in your inbox; if you need the
-  result to continue, run `herald wait` (background if your harness supports
-  being woken by finished background commands, otherwise with `--timeout`).
+  result to continue, prefer `herald ask` (send + wait in one turn), or run
+  `herald wait` (background if your harness supports being woken by finished
+  background commands, otherwise with `--timeout`).
 - If a peer is offline the send is **queued, not lost** — you'll see "Peer
   '<name>' is unreachable ... queued for retry". Queued items deliver
   automatically on your next successful contact with that peer, are retried by
@@ -97,7 +109,9 @@ for its target.
 To stay reachable ("listen on herald"): run `herald wait` as a background process
 (set a distinct `HERALD_AGENT`). It blocks until something new arrives, prints a
 summary, and exits — if your harness re-invokes you when background commands
-finish, that wakes you on delivery. Handle the items, then restart `herald wait`.
+finish, that wakes you on delivery. Add `--read` to have it print and claim the
+item on wake, folding the `read` into the same turn. Handle the items, then
+restart `herald wait`.
 `herald wait` only wakes for items addressed to your `HERALD_AGENT` or broadcast, so
 running several listeners does not mean they all wake for every message. If
 your harness has no background-wake mechanism, check `herald inbox --unclaimed` at

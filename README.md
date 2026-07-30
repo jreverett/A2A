@@ -66,6 +66,8 @@ Peer names must be exactly the name the other person installed with
 herald send bob -m "the QA refresh is done" -f ./results.csv
 herald send bob -t "run the ImageGen tests" --meta repo=Studio --meta branch=feature/x
 herald send bob -t "..." --agent bob-ticket99   # address one of bob's sessions
+herald ask bob -t "run the ImageGen tests"      # send AND wait for the reply, in one command
+herald ping bob                                 # is bob's daemon up? which version? (no agent woken)
 
 herald inbox --unclaimed         # what's waiting and not yet picked up (--mine: only for this agent)
 herald read <id>                 # show an item, write its files to cwd, claim it
@@ -89,6 +91,13 @@ bob's agent:  (woken by its background `herald wait`, claims the item on read)
                 herald result <id> --status done -m "42 passed" -f results.trx
 alice's agent:  (woken by its own `herald wait`, folds the result back into its work)
 ```
+
+**Keeping it fast and cheap.** Most of what a listener does is acknowledge,
+dispatch and simple triage, so run your *listening* session on a fast, low-cost
+model and reserve a stronger one for sessions doing real work. `herald ask`,
+`herald ping` and `wait --read` also cut the number of round-trips per exchange —
+where most of the latency and token cost lives (see
+[docs/performance.md](docs/performance.md)).
 
 ## Many agents per person
 
