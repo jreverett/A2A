@@ -2,6 +2,15 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `herald --version` prints the running version.
 
+## 0.5.1
+
+- Installer fixes from Simon's migration feedback. The skill is now relinked into
+  every skills dir the machine uses - the standard `~/.claude`, any
+  `CLAUDE_CONFIG_DIR`, and any other agent skills dir that already had the skill
+  (extra Claude configs, other harnesses) - retiring the pre-rename `a2a` link in
+  each, instead of only touching `~/.claude/skills`. Shell scripts are also now
+  marked executable in git, so a fresh clone no longer needs `bash install.sh`.
+
 ## 0.5.0
 
 - Streamlining to cut latency and token cost, which are dominated by the number

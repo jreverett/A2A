@@ -158,12 +158,27 @@ case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *)
   echo "Added ~/.local/bin to PATH in ~/.bashrc (open a new shell)" ;;
 esac
 
-# 3. agent skill/instructions
-if [ -d "$HOME/.claude" ]; then
-  mkdir -p "$HOME/.claude/skills"
-  ln -sfn "$REPO_DIR/skill" "$HOME/.claude/skills/herald"
-  echo "Claude Code skill installed (~/.claude/skills/herald)"
-fi
+# 3. agent skill/instructions - install into every skills dir this machine uses:
+# the standard ~/.claude, any CLAUDE_CONFIG_DIR, and any other agent skills dir
+# that already had the skill (so extra Claude configs and other harnesses stay in
+# sync), retiring the pre-rename 'a2a' link in each.
+skill_dirs=""
+[ -d "$HOME/.claude" ] && skill_dirs="$HOME/.claude/skills"
+[ -n "${CLAUDE_CONFIG_DIR:-}" ] && skill_dirs="$skill_dirs ${CLAUDE_CONFIG_DIR%/}/skills"
+for d in "$HOME"/.*/skills; do
+  if [ -e "$d/herald" ] || [ -e "$d/a2a" ]; then
+    skill_dirs="$skill_dirs $d"
+  fi
+done
+installed=""
+for d in $skill_dirs; do
+  case " $installed " in *" $d "*) continue ;; esac
+  installed="$installed $d"
+  mkdir -p "$d"
+  if [ -L "$d/a2a" ]; then rm -f "$d/a2a"; fi   # retire the pre-rename link
+  ln -sfn "$REPO_DIR/skill" "$d/herald"
+  echo "Skill installed: $d/herald"
+done
 for f in "$HOME/.codex/AGENTS.md" "$HOME/.copilot/copilot-instructions.md"; do
   if [ -f "$f" ] && ! grep -q "herald agent protocol pointer" "$f"; then
     printf '\n# herald agent protocol pointer\nFor messaging other people'"'"'s agents (herald), follow %s/skill/SKILL.md\n' "$REPO_DIR" >> "$f"
