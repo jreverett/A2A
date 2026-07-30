@@ -14,7 +14,7 @@ Versioning is `0.MAJOR.MINOR` while pre-1.0. `herald --version` prints the runni
 ## 0.5.0
 
 - Streamlining to cut latency and token cost, which are dominated by the number
-  of LLM round-trips per exchange (see docs/performance.md).
+  of LLM round-trips per exchange.
 - `herald ask <peer>` sends and blocks for the reply in a single command, so a
   synchronous request/reply is one turn instead of `send` + `wait` + `read`.
   Reachable peers only; an offline peer falls back to the async queue.

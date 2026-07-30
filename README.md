@@ -96,8 +96,7 @@ alice's agent:  (woken by its own `herald wait`, folds the result back into its 
 dispatch and simple triage, so run your *listening* session on a fast, low-cost
 model and reserve a stronger one for sessions doing real work. `herald ask`,
 `herald ping` and `wait --read` also cut the number of round-trips per exchange —
-where most of the latency and token cost lives (see
-[docs/performance.md](docs/performance.md)).
+where most of the latency and token cost lives.
 
 ## Many agents per person
 
