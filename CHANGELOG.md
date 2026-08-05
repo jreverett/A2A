@@ -10,6 +10,8 @@ Versioning is `0.MAJOR.MINOR` while pre-1.0. `herald --version` prints the runni
 - The installer now links the Herald skill into existing Claude, Codex,
   Copilot, and shared agent skill directories instead of installing it only
   where an older Herald link already exists.
+- Re-running the installer now restarts the existing daemon so an update does
+  not leave the previous version running in memory.
 
 ## 0.7.0
 

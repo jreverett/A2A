@@ -199,7 +199,8 @@ Restart=on-failure
 WantedBy=default.target
 EOF
   systemctl --user daemon-reload
-  if systemctl --user enable --now herald-daemon.service 2>/dev/null; then
+  if systemctl --user enable herald-daemon.service 2>/dev/null \
+      && systemctl --user restart herald-daemon.service 2>/dev/null; then
     echo "Daemon running (systemd user service herald-daemon)"
   else
     echo "Could not start the systemd service; start the daemon manually:"
