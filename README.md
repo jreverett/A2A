@@ -110,19 +110,19 @@ person. Set `HERALD_AGENT` per terminal to give each session a distinct name
 (it defaults to the hostname); `herald sessions` lists the ones currently
 listening.
 
-- **Broadcast (default):** any of your running sessions can pick an item up.
-  `herald read` claims it first-come-first-served and other sessions see it as
-  taken.
+- **Single delivery (default):** each item goes to exactly **one** of your live
+  sessions — the daemon assigns it to the most recently active one, so only that
+  session's `herald wait` wakes. Every other session skips it in-process without
+  waking its agent, so N tabs don't all light up (and burn tokens) per message.
 - **Targeted:** a sender can address one session with `--agent <name>`, and
-  `reply`/`result` do this automatically so a task's result returns to the
-  session that started it. `herald wait` only wakes for items addressed to its
-  own `HERALD_AGENT` (or broadcast), so extra listeners don't all wake per
-  message.
+  `reply`/`result` do this automatically so a task's result returns to the exact
+  session that started it.
+- **Broadcast:** `--all` on `send`/`reply`/`result` delivers to *every* one of
+  the recipient's sessions — for the occasional genuine announcement.
 - **Liveness:** sessions heartbeat while listening. If a session claims an item
-  then dies, `herald read` from another session reclaims it rather than
-  refusing. If a targeted session never reappears, the daemon releases the item
-  to any session and tells the sender (or, per `--fallback`, holds it or bounces
-  an undeliverable notice back).
+  then dies, `herald read` from another session reclaims it. If the session an
+  item was delivered to disappears, it's reassigned to one other live session
+  (a targeted item honours `--fallback`: reassign, hold, or bounce).
 
 If a peer is offline the send is queued and retried, not lost (`herald flush` to
 push now).

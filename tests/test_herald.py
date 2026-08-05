@@ -306,5 +306,26 @@ class Protocol(unittest.TestCase):
         self.assertEqual(item.get("claimed_by"), "bob-wr")
 
 
+    def test_all_flag_broadcasts(self):
+        self.cli("alice", "send", "bob", "-m", "announce", "--all")
+        item = self.wait_for_inbox("bob", lambda i: i["text"] == "announce")
+        self.assertIsNotNone(item)
+        self.assertTrue(item.get("broadcast"))
+        self.assertEqual(item.get("to_agent", ""), "")   # every session wakes; not pinned to one
+
+    def test_anycast_delivered_to_one_live_session(self):
+        # inject a live listening session for bob (this test process's pid is alive)
+        sdir = os.path.join(self.homes["bob"], "sessions")
+        os.makedirs(sdir, exist_ok=True)
+        with open(os.path.join(sdir, "bob-tab.json"), "w") as f:
+            json.dump({"agent": "bob-tab", "pid": os.getpid(),
+                       "host": socket.gethostname(), "heartbeat": time.time()}, f)
+        self.cli("alice", "send", "bob", "-m", "single delivery")   # default = anycast
+        item = self.wait_for_inbox("bob", lambda i: i["text"] == "single delivery")
+        self.assertIsNotNone(item)
+        self.assertFalse(item.get("broadcast"))
+        self.assertEqual(item.get("to_agent"), "bob-tab")   # handed to the one live session
+
+
 if __name__ == "__main__":
     unittest.main()

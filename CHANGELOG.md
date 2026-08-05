@@ -2,6 +2,17 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `herald --version` prints the running version.
 
+## 0.7.0
+
+- Single delivery: a message now goes to exactly one of the recipient's live
+  sessions, not all of them. The daemon assigns each item to one session (the
+  most recently active), so only that session's `herald wait` wakes; every other
+  session skips it silently in-process and never wakes its agent. A reply routes
+  back to the session that sent the request; if that session is gone it is
+  reassigned to one other live session, not fanned out to every tab.
+- `--all` on `send`/`reply`/`result` delivers to every one of the recipient's
+  sessions, for a genuine announcement.
+
 ## 0.6.0
 
 - Access control, part one: authenticated peer identity. Every peer now gets

@@ -46,7 +46,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 HERALD_DIR = Path(os.environ.get("HERALD_DIR", Path.home() / ".herald"))
 CONFIG_PATH = HERALD_DIR / "config.json"
@@ -229,6 +229,8 @@ class Handler(BaseHTTPRequestHandler):
 
             "from_agent": str(item.get("from_agent", ""))[:64],
             "to_agent": str(item.get("to_agent", ""))[:64],
+            "broadcast": bool(item.get("broadcast")),   # --all: every session wakes
+            "targeted": bool(item.get("targeted")),     # sender chose the session; honour give-up
             "fallback": item["fallback"] if item.get("fallback") in FALLBACKS else "broadcast",
             "kind": item["kind"],
             "status": item.get("status", ""),
@@ -253,6 +255,8 @@ class Handler(BaseHTTPRequestHandler):
             fpath.write_bytes(raw)
             stored["files"].append(
                 {"filename": fname, "size": len(raw), "stored_path": str(fpath)})
+        if not stored["broadcast"] and not stored["to_agent"]:
+            stored["to_agent"] = _pick_live()   # anycast: deliver to one live session ('' -> _route assigns later)
         (INBOX_DIR / f"{item_id}.json").write_text(json.dumps(stored, indent=2))
         touch_activity("recv")
         self._json(200, {"ok": True, "id": item_id, "thread": stored["thread"]})
@@ -325,6 +329,10 @@ def _maintenance_loop(me, listen, started):
             # pick up newly issued/removed peer tokens without needing a restart
             Handler.peer_by_token = {p["issued_token"]: name
                                      for name, p in cfg.get("peers", {}).items() if p.get("issued_token")}
+            try:
+                _route(cfg)   # keep single-copy items assigned to one live session
+            except (OSError, json.JSONDecodeError):
+                pass
         if cfg and tick % retry_every == 0 and any(QUEUE_DIR.glob("*/*.json")):
             for peer_name in cfg.get("peers", {}):
                 try:
@@ -338,6 +346,40 @@ def _maintenance_loop(me, listen, started):
                 pass
         tick += 1
         time.sleep(HEARTBEAT_INTERVAL)
+
+
+def _pick_live(sessions=None):
+    """One live session to hand a single-copy item to: the most recently
+    heartbeated, or '' if nobody is listening."""
+    if sessions is None:
+        sessions = read_sessions()
+    live = [(s.get("heartbeat", 0), n) for n, s in sessions.items() if session_alive(n, sessions)]
+    return max(live)[1] if live else ""
+
+
+def _route(cfg):
+    """Single-delivery: keep each anycast item (not broadcast, not sender-
+    targeted) assigned to exactly one live session, so only that session's
+    `wait` wakes for it. Reassign if its session dies. Sender-targeted items are
+    left to _reap's give-up logic."""
+    sessions = read_sessions()
+    for p in INBOX_DIR.glob("*.json"):
+        try:
+            item = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if item.get("broadcast") or item.get("claimed_by") or item.get("targeted"):
+            continue
+        cur = item.get("to_agent", "")
+        if cur and session_alive(cur, sessions):
+            continue
+        chosen = _pick_live(sessions)
+        if chosen and chosen != cur:
+            item["to_agent"] = chosen
+            try:
+                p.write_text(json.dumps(item, indent=2))
+            except OSError:
+                pass
 
 
 def _reap(cfg):
@@ -358,9 +400,9 @@ def _reap(cfg):
         except (OSError, json.JSONDecodeError):
             continue
         target = item.get("to_agent", "")
-        if (not target or item.get("claimed_by") or item.get("unpinned")
-                or item.get("bounced")):
-            continue
+        if (not target or not item.get("targeted") or item.get("claimed_by")
+                or item.get("unpinned") or item.get("bounced")):
+            continue   # anycast items are handled by _route, not the give-up path
         if session_alive(target, sessions):
             continue
         if now - item.get("received_ts", 0) < TARGET_GIVEUP:
@@ -374,13 +416,15 @@ def _reap(cfg):
                            "undeliverable")
             item["bounced"] = True
         else:
+            chosen = _pick_live(sessions)
             _notify_origin(cfg, item, target,
                            f"Reassigned: agent '{target}' was unreachable, so your "
-                           f"{item.get('kind')} in thread {item.get('thread')} has been "
-                           f"released for any of {cfg['me']}'s sessions to handle.",
+                           f"{item.get('kind')} in thread {item.get('thread')} went to "
+                           f"another of {cfg['me']}'s sessions.",
                            "reassigned")
             item["unpinned"] = True
-            item["to_agent"] = ""
+            item["targeted"] = False    # now anycast; _route moves it on if that session dies too
+            item["to_agent"] = chosen   # one live session, or "" until _route assigns one
         try:
             p.write_text(json.dumps(item, indent=2))
         except OSError:
@@ -527,8 +571,11 @@ def cmd_send(cfg, args):
         payload["status"] = "pending"
     if args.thread:
         payload["thread"] = args.thread
-    if args.agent:
+    if args.all:
+        payload["broadcast"] = True
+    elif args.agent:
         payload["to_agent"] = args.agent
+        payload["targeted"] = True
         payload["fallback"] = args.fallback
     attach_files(payload, args.file)
     result = deliver(cfg, args.peer, payload)
@@ -553,10 +600,14 @@ def cmd_reply(cfg, args):
         "reply_to": orig["id"],
         "meta": parse_meta(args.meta),
     }
-    target = args.agent or orig.get("from_agent") or ""
-    if target:
-        payload["to_agent"] = target
-        payload["fallback"] = args.fallback
+    if args.all:
+        payload["broadcast"] = True
+    else:
+        target = args.agent or orig.get("from_agent") or ""
+        if target:
+            payload["to_agent"] = target
+            payload["targeted"] = True
+            payload["fallback"] = args.fallback
     attach_files(payload, args.file)
     result = deliver(cfg, orig["from"], payload)
     if result is None:
@@ -576,10 +627,14 @@ def cmd_result(cfg, args):
         "reply_to": orig["id"],
         "meta": parse_meta(args.meta),
     }
-    target = args.agent or orig.get("from_agent") or ""
-    if target:
-        payload["to_agent"] = target
-        payload["fallback"] = args.fallback
+    if args.all:
+        payload["broadcast"] = True
+    else:
+        target = args.agent or orig.get("from_agent") or ""
+        if target:
+            payload["to_agent"] = target
+            payload["targeted"] = True
+            payload["fallback"] = args.fallback
     attach_files(payload, args.file)
     result = deliver(cfg, orig["from"], payload)
     if result is None:
@@ -721,10 +776,11 @@ def cmd_wait(cfg, args):
         mine = []
         for name in sorted({p.name for p in INBOX_DIR.glob("*.json")} - known):
             item = json.loads((INBOX_DIR / name).read_text())
-            target = item.get("to_agent", "")
-            if target and target != me:
-                continue   # addressed to another session; leave it in play, re-check next tick
-            mine.append(item)
+            if item.get("broadcast"):
+                mine.append(item)          # --all: every session wakes
+            elif item.get("to_agent", "") == me:
+                mine.append(item)          # single-delivery: this copy is for me
+            # else: assigned to another session, or not yet assigned - skip silently, no agent woken
         if mine:
             for item in mine:
                 if args.read:
@@ -959,6 +1015,8 @@ def main():
     sp.add_argument("--fallback", choices=FALLBACKS, default="broadcast",
                     help="if the target session never appears: broadcast (release to any), "
                          "hold (keep pinned), bounce (return undeliverable to you)")
+    sp.add_argument("--all", action="store_true",
+                    help="deliver to ALL the recipient's sessions (default: one)")
 
     sp = sub.add_parser("reply", help="reply to an inbox item (peer/thread inferred)")
     sp.add_argument("id")
@@ -967,6 +1025,7 @@ def main():
     sp.add_argument("--meta", action="append")
     sp.add_argument("--agent", help="override the target session (defaults to the sender's)")
     sp.add_argument("--fallback", choices=FALLBACKS, default="broadcast")
+    sp.add_argument("--all", action="store_true", help="deliver to ALL the recipient's sessions")
 
     sp = sub.add_parser("result", help="send a task status/result back to its sender")
     sp.add_argument("id", help="the inbox task item id")
@@ -976,6 +1035,7 @@ def main():
     sp.add_argument("--meta", action="append")
     sp.add_argument("--agent", help="override the target session (defaults to the sender's)")
     sp.add_argument("--fallback", choices=FALLBACKS, default="broadcast")
+    sp.add_argument("--all", action="store_true", help="deliver to ALL the recipient's sessions")
 
     sp = sub.add_parser("inbox", help="list received items")
     sp.add_argument("--unclaimed", action="store_true")

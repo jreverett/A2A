@@ -69,14 +69,15 @@ herald ping <person>                                  # is their daemon up? whic
   `--agent` on `reply`/`result` to override. You learn a peer's session names
   from what they send you (echoed back automatically) or out of band; there is
   no cross-machine session discovery.
-- **To receive targeted replies, send and listen under the same `HERALD_AGENT`.**
-  Auto-targeting only kicks in when the original sender had `HERALD_AGENT` set — an
-  unset sender is stamped blank and its replies broadcast to any of the person's
-  listeners. So if you send from a shell that leaves `HERALD_AGENT` at its default
-  and listen under a distinct name, set `HERALD_AGENT` to that same listener name on
-  the sending shell, or accept broadcast replies.
+- **Delivery is single-copy by default:** each item is handed to exactly one of
+  the recipient's live sessions, so only that session's `wait` wakes — other
+  sessions skip it silently. To get a reply back in *this* session, send and
+  `wait` under one stable `HERALD_AGENT`: a reply auto-targets the session that
+  sent the request, and if that session is unset or gone the reply goes to one
+  live session, not necessarily this one. Use `--all` only for a genuine
+  announcement to every session.
 - **If the target session never reappears**, the peer's daemon eventually acts on
-  your `--fallback` choice: `broadcast` (default — release to any of their
+  your `--fallback` choice: `broadcast` (default — reassign to one of their live
   sessions and send you a "reassigned" notice), `hold` (keep it pinned for that
   session), or `bounce` (return an "undeliverable" notice to you). Watch for
   those `herald_intent: reassigned` / `undeliverable` messages in replies.
@@ -112,8 +113,9 @@ summary, and exits — if your harness re-invokes you when background commands
 finish, that wakes you on delivery. Add `--read` to have it print and claim the
 item on wake, folding the `read` into the same turn. Handle the items, then
 restart `herald wait`.
-`herald wait` only wakes for items addressed to your `HERALD_AGENT` or broadcast, so
-running several listeners does not mean they all wake for every message. If
+`herald wait` only wakes for the single item delivered to your `HERALD_AGENT` (or
+an `--all` broadcast), so running several listeners never means they all wake for
+the same message — each message wakes exactly one. If
 your harness has no background-wake mechanism, check `herald inbox --unclaimed` at
 natural pauses.
 
