@@ -6,9 +6,9 @@ conversations: messages, task requests with a lifecycle (pending -> working ->
 done/failed), results with attached files, and structured metadata. Each
 machine runs `herald daemon` (reachable over Tailscale); `herald wait` blocks until
 delivery so a session gets woken instead of polling. A person can run many
-agent sessions at once: the first session to `herald read` an item claims it
-(set HERALD_AGENT to name a session; defaults to hostname). See skill/SKILL.md
-for the protocol agents follow.
+agent sessions at once: the first session to `herald read` an item claims it.
+Session-sensitive commands require HERALD_AGENT. See skill/SKILL.md for the
+protocol agents follow.
 
 Config in ~/.herald/config.json:
 {
@@ -46,7 +46,7 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
 
 HERALD_DIR = Path(os.environ.get("HERALD_DIR", Path.home() / ".herald"))
 CONFIG_PATH = HERALD_DIR / "config.json"
@@ -1092,6 +1092,18 @@ def main():
     sub.add_parser("sessions", help="list agent sessions currently listening")
 
     args = p.parse_args()
+    identity_commands = {"send", "reply", "result", "read", "wait", "ask"}
+    if args.cmd in identity_commands and not os.environ.get("HERALD_AGENT"):
+        sys.exit(
+            f"HERALD_AGENT is required for `herald {args.cmd}`. Set one stable session name "
+            f"and use it for every related command, for example: "
+            f"HERALD_AGENT=codex-ticket123 herald {args.cmd} ..."
+        )
+    if args.cmd == "inbox" and args.mine and not os.environ.get("HERALD_AGENT"):
+        sys.exit(
+            "HERALD_AGENT is required for `herald inbox --mine`. Set one stable session name "
+            "and use it for every related command."
+        )
     cfg = None if args.cmd == "init" else load_config()
     {"init": cmd_init, "daemon": cmd_daemon, "send": cmd_send, "reply": cmd_reply,
      "result": cmd_result, "inbox": cmd_inbox, "read": cmd_read, "peer": cmd_peer,

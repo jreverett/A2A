@@ -158,12 +158,12 @@ case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *)
   echo "Added ~/.local/bin to PATH in ~/.bashrc (open a new shell)" ;;
 esac
 
-# 3. agent skill/instructions - install into every skills dir this machine uses:
-# the standard ~/.claude, any CLAUDE_CONFIG_DIR, and any other agent skills dir
-# that already had the skill (so extra Claude configs and other harnesses stay in
-# sync), retiring the pre-rename 'a2a' link in each.
+# 3. agent skill/instructions - install into every supported agent skills dir
+# that exists, plus any directory that already has herald or the old a2a skill.
 skill_dirs=""
-[ -d "$HOME/.claude" ] && skill_dirs="$HOME/.claude/skills"
+for agent_home in "$HOME/.claude" "$HOME/.agents" "$HOME/.codex" "$HOME/.copilot"; do
+  [ -d "$agent_home" ] && skill_dirs="$skill_dirs $agent_home/skills"
+done
 [ -n "${CLAUDE_CONFIG_DIR:-}" ] && skill_dirs="$skill_dirs ${CLAUDE_CONFIG_DIR%/}/skills"
 for d in "$HOME"/.*/skills; do
   if [ -e "$d/herald" ] || [ -e "$d/a2a" ]; then

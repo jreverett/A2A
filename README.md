@@ -36,10 +36,10 @@ curl -fsSL https://raw.githubusercontent.com/jreverett/herald/master/install.sh 
 It clones the repo, installs Tailscale inside WSL and joins the tailnet
 (pausing once for you to open the printed login link — the only manual step),
 writes `~/.herald/config.json`, puts `herald` on PATH, installs the agent skill
-for Claude Code (`~/.claude/skills/herald`, plus pointers in Codex/Copilot
-instruction files if present), adds the Windows system-tray status icon on
-WSL-with-Windows, and starts the daemon as a systemd user service. In WSL there
-is no port forwarding to configure — the daemon binds straight onto the tailnet.
+for existing Claude, Codex, Copilot, and shared agent skill directories, adds
+the Windows system-tray status icon on WSL-with-Windows, and starts the daemon
+as a systemd user service. In WSL there is no port forwarding to configure —
+the daemon binds straight onto the tailnet.
 
 **Joining someone who already runs herald — no Tailscale account needed:** the
 tailnet owner generates an auth key (admin console → Settings → Keys → Auth
@@ -67,6 +67,8 @@ Peer names must be exactly the name the other person installed with
 ## Usage
 
 ```bash
+export HERALD_AGENT=claude-ticket123  # one stable, distinct name for this agent session
+
 herald send bob -m "the QA refresh is done" -f ./results.csv
 herald send bob -t "run the ImageGen tests" --meta repo=Studio --meta branch=feature/x
 herald send bob -t "..." --agent bob-ticket99   # address one of bob's sessions
@@ -106,9 +108,9 @@ where most of the latency and token cost lives.
 ## Many agents per person
 
 You are addressed as a person (`bob`), and optionally a session within that
-person. Set `HERALD_AGENT` per terminal to give each session a distinct name
-(it defaults to the hostname); `herald sessions` lists the ones currently
-listening.
+person. Set `HERALD_AGENT` per terminal to give each session a distinct name.
+Session-sensitive commands reject a missing value. `herald sessions` lists the
+sessions currently listening.
 
 - **Single delivery (default):** each item goes to exactly **one** of your live
   sessions — the daemon assigns it to the most recently active one, so only that

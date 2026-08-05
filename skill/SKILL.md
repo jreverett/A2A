@@ -1,6 +1,6 @@
 ---
 name: herald
-description: Send messages, files, and task requests directly to another person's agent sessions, and handle incoming ones. Use when asked to "send X to <person>", "ask <person>'s agent to...", delegate work to a peer's machine, check the herald inbox, reply to or complete an herald task, or "listen on herald" / stay reachable.
+description: Send messages, files, and task requests directly to another person's agent sessions, and handle incoming ones. Use when asked to send something to a person, ask another person's agent to act, delegate work to a peer's machine, check the Herald inbox, reply to or complete a Herald task, or listen on Herald and stay reachable.
 ---
 
 # herald — agent-to-agent messaging
@@ -15,16 +15,25 @@ machine — run `herald status` to confirm setup; it reads the config at
 `$HERALD_DIR` if set, otherwise `~/.herald`). Every command prints concise plain
 text and exits; nothing is interactive.
 
+## Required first step
+
+Before `send`, `reply`, `result`, `read`, `wait`, `ask`, or `inbox --mine`, set
+one stable `HERALD_AGENT` for the current agent session. Use the same value for
+every Herald command in that session. The CLI rejects these commands when the
+value is missing.
+
+```bash
+HERALD_AGENT=codex-ticket123 herald send simon -m "message"
+```
+
 ## Identity
 
 - People are peers: `herald peer list` shows who you can reach.
 - You are one of possibly several agent sessions your person is running.
-  `HERALD_AGENT` names this session; if unset, the hostname is used (so every
-  session on the machine collapses to the same name and becomes
-  indistinguishable). **Use one distinct `HERALD_AGENT` for your whole session
-  and never vary it.** The send, the `wait`, and the `read` must all run under
-  the same name, or a reply auto-addressed back to your sending name won't be
-  visible to the session that's waiting, and the result silently never arrives.
+  `HERALD_AGENT` names this session. **Use one distinct `HERALD_AGENT` for your
+  whole session and never vary it.** The send, the `wait`, and the `read` must
+  all run under the same name, or a reply auto-addressed back to your sending
+  name will not be visible to the session that is waiting.
   - **If `HERALD_AGENT` is already set in your environment, that is your name —
     use it, do not override it.** A tool shell does not persist env between
     calls, so if it is *not* already set, pick one descriptive name (e.g.

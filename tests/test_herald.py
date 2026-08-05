@@ -182,6 +182,12 @@ class Protocol(unittest.TestCase):
         self.assertIn(herald.__version__, r.stdout)
         self.assertIn("bob", r.stdout)
 
+    def test_send_requires_agent_identity(self):
+        r = self.cli("alice", "send", "bob", "-m", "hello bob")
+
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("HERALD_AGENT is required", r.stderr)
+
     def test_bad_token_rejected(self):
         req = urllib.request.Request(
             f"http://127.0.0.1:{self.ports['bob']}/send",
@@ -212,7 +218,7 @@ class Protocol(unittest.TestCase):
         self.assertEqual(item["from"], "alice")   # authenticated by token, not the forged 'mallory'
 
     def test_send_lands_in_peer_inbox(self):
-        r = self.cli("alice", "send", "bob", "-m", "hello bob")
+        r = self.cli("alice", "send", "bob", "-m", "hello bob", agent="alice-1")
         self.assertEqual(r.returncode, 0, r.stderr)
         item = self.wait_for_inbox("bob", lambda i: i["text"] == "hello bob")
         self.assertIsNotNone(item)
@@ -220,7 +226,7 @@ class Protocol(unittest.TestCase):
         self.assertEqual(item["kind"], "message")
 
     def test_read_claims_item(self):
-        self.cli("alice", "send", "bob", "-m", "claim me")
+        self.cli("alice", "send", "bob", "-m", "claim me", agent="alice-1")
         item = self.wait_for_inbox("bob", lambda i: i["text"] == "claim me")
         r = self.cli("bob", "read", item["id"], agent="bob-1")
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -240,7 +246,8 @@ class Protocol(unittest.TestCase):
         self.assertEqual(result["to_agent"], "alice-1")   # not stranded on a ghost name
 
     def test_targeted_item_refuses_wrong_session(self):
-        self.cli("alice", "send", "bob", "-t", "for target", "--agent", "bob-target")
+        self.cli("alice", "send", "bob", "-t", "for target", "--agent", "bob-target",
+                 agent="alice-1")
         task = self.wait_for_inbox("bob", lambda i: i["text"] == "for target")
         wrong = self.cli("bob", "read", task["id"], agent="bob-other")
         self.assertNotEqual(wrong.returncode, 0)
@@ -249,7 +256,7 @@ class Protocol(unittest.TestCase):
         self.assertEqual(right.returncode, 0, right.stderr)
 
     def test_claim_stolen_from_dead_session(self):
-        self.cli("alice", "send", "bob", "-m", "orphaned")
+        self.cli("alice", "send", "bob", "-m", "orphaned", agent="alice-1")
         item = self.wait_for_inbox("bob", lambda i: i["text"] == "orphaned")
         path = os.path.join(self.homes["bob"], "inbox", f"{item['id']}.json")
         item["claimed_by"] = "ghost-session"     # a session that never heartbeats
@@ -262,7 +269,7 @@ class Protocol(unittest.TestCase):
 
     def test_queue_on_offline_then_flush(self):
         self.stop_daemon("bob")
-        r = self.cli("alice", "send", "bob", "-m", "while offline")
+        r = self.cli("alice", "send", "bob", "-m", "while offline", agent="alice-1")
         self.assertIn("queued", (r.stdout + r.stderr).lower())
         qdir = os.path.join(self.homes["alice"], "queue", "bob")
         self.assertTrue(os.path.isdir(qdir) and os.listdir(qdir))
@@ -296,7 +303,7 @@ class Protocol(unittest.TestCase):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             time.sleep(1)   # let wait snapshot the inbox before we send
-            self.cli("alice", "send", "bob", "-m", "HELLO-WR")
+            self.cli("alice", "send", "bob", "-m", "HELLO-WR", agent="alice-1")
             out, err = p.communicate(timeout=18)
         finally:
             if p.poll() is None:
@@ -307,7 +314,7 @@ class Protocol(unittest.TestCase):
 
 
     def test_all_flag_broadcasts(self):
-        self.cli("alice", "send", "bob", "-m", "announce", "--all")
+        self.cli("alice", "send", "bob", "-m", "announce", "--all", agent="alice-1")
         item = self.wait_for_inbox("bob", lambda i: i["text"] == "announce")
         self.assertIsNotNone(item)
         self.assertTrue(item.get("broadcast"))
@@ -320,7 +327,8 @@ class Protocol(unittest.TestCase):
         with open(os.path.join(sdir, "bob-tab.json"), "w") as f:
             json.dump({"agent": "bob-tab", "pid": os.getpid(),
                        "host": socket.gethostname(), "heartbeat": time.time()}, f)
-        self.cli("alice", "send", "bob", "-m", "single delivery")   # default = anycast
+        self.cli("alice", "send", "bob", "-m", "single delivery",
+                 agent="alice-1")   # default = anycast
         item = self.wait_for_inbox("bob", lambda i: i["text"] == "single delivery")
         self.assertIsNotNone(item)
         self.assertFalse(item.get("broadcast"))

@@ -2,6 +2,15 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `herald --version` prints the running version.
 
+## 0.7.1
+
+- Session-sensitive commands now require `HERALD_AGENT`, so an agent cannot
+  send a message with a blank reply address or claim work under a shared
+  hostname by mistake. The error gives the exact inline command format.
+- The installer now links the Herald skill into existing Claude, Codex,
+  Copilot, and shared agent skill directories instead of installing it only
+  where an older Herald link already exists.
+
 ## 0.7.0
 
 - Single delivery: a message now goes to exactly one of the recipient's live
