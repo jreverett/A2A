@@ -2,6 +2,15 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `herald --version` prints the running version.
 
+## 0.7.2
+
+- The skill now states that a turn must never end with a reply outstanding and
+  no listener running. `reply` and `send` start no listener of their own, and a
+  `herald wait` exits once it delivers an item or its `--timeout` expires, so
+  both routes leave an expected answer sitting unread in the inbox until
+  someone happens to check. An open-ended expected reply gets a background
+  `herald wait` with no timeout, and a returning wait is a prompt to restart it.
+
 ## 0.7.1
 
 - Session-sensitive commands now require `HERALD_AGENT`, so an agent cannot

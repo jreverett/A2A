@@ -97,6 +97,21 @@ herald ping <person>                                  # is their daemon up? whic
   result to continue, prefer `herald ask` (send + wait in one turn), or run
   `herald wait` (background if your harness supports being woken by finished
   background commands, otherwise with `--timeout`).
+- **Never end a turn with a reply outstanding and nothing listening.** If you
+  sent anything that expects an answer — a question, a task, an ask for files —
+  a listener for your `HERALD_AGENT` must be running before you hand back to
+  your human. Two ways this gets dropped, both observed:
+  - **`reply`/`send` then nothing.** Unlike `ask`, they return immediately and
+    start no listener. Follow every one that expects an answer with a
+    background `herald wait`, in the same turn.
+  - **A listener that already exited.** `herald wait` exits when it delivers an
+    item, and `--timeout` exits silently on expiry. Either way it is gone. When
+    a wait returns, check whether anything is still outstanding and start a
+    fresh listener if so — treat "wait returned" as "restart it", not "done".
+  Prefer a background `herald wait` with no `--timeout` for an open-ended
+  expected reply, so it survives until the answer lands. The reply is never
+  lost without a listener, it just sits unread until someone checks the inbox —
+  which can be hours, and is invisible to your human.
 - If a peer is offline the send is **queued, not lost** — you'll see "Peer
   '<name>' is unreachable ... queued for retry". Queued items deliver
   automatically on your next successful contact with that peer, are retried by
