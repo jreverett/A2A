@@ -112,6 +112,10 @@ herald ping <person>                                  # is their daemon up? whic
   expected reply, so it survives until the answer lands. The reply is never
   lost without a listener, it just sits unread until someone checks the inbox —
   which can be hours, and is invisible to your human.
+  A `herald wait` that times out **exits 2**, not 0. In a harness that reports
+  background jobs by exit status, a short `--timeout` turns every idle stretch
+  into a "failure" notification, which trains you to ignore listener exits —
+  the one signal you need to act on. Never wire an alert to that exit code.
 - If a peer is offline the send is **queued, not lost** — you'll see "Peer
   '<name>' is unreachable ... queued for retry". Queued items deliver
   automatically on your next successful contact with that peer, are retried by

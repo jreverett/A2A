@@ -2,6 +2,12 @@
 
 Versioning is `0.MAJOR.MINOR` while pre-1.0. `herald --version` prints the running version.
 
+## 0.7.3
+
+- The skill now records that a timed-out `herald wait` exits 2. A short
+  `--timeout` therefore reports every idle stretch as a failed background job,
+  which teaches the reader to ignore listener exits entirely.
+
 ## 0.7.2
 
 - The skill now states that a turn must never end with a reply outstanding and
